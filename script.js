@@ -208,6 +208,18 @@ function onDragMove(e) {
   activePiece.style.top = `${coords.y - dragOffset.y}px`;
 }
 
+// Fallback slot detector in case elementFromPoint misfires on iOS touch
+function findSlotFromCoords(x, y) {
+  const slots = document.querySelectorAll('.slot');
+  for (const slot of slots) {
+    const r = slot.getBoundingClientRect();
+    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+      return slot;
+    }
+  }
+  return null;
+}
+
 async function onDragEnd(e) {
   if (!activePiece) return;
 
@@ -220,20 +232,25 @@ async function onDragEnd(e) {
   activeTouchId = null;
 
   piece.classList.remove('dragging');
+  piece.style.pointerEvents = 'auto'; // Re-enable touch interactions
+
   const tag = piece.querySelector('.player-tag');
   if (tag) tag.remove();
 
-  // Temporarily hide piece to detect drop slot underneath
-  piece.style.display = 'none';
-  const dropElem = document.elementFromPoint(coords.x, coords.y);
-  piece.style.display = 'block';
+  // Primary slot check via elementFromPoint
+  let dropElem = document.elementFromPoint(coords.x, coords.y);
+  let slot = dropElem ? dropElem.closest('.slot') : null;
+
+  // Secondary slot check via bounding box
+  if (!slot) {
+    slot = findSlotFromCoords(coords.x, coords.y);
+  }
+
+  const isOverTray = dropElem ? dropElem.closest('#tray') : null;
 
   piece.style.position = 'relative';
   piece.style.left = '0px';
   piece.style.top = '0px';
-
-  const slot = dropElem ? dropElem.closest('.slot') : null;
-  const isOverTray = dropElem ? dropElem.closest('#tray') : null;
 
   let targetLocation = 'tray';
 
@@ -292,6 +309,7 @@ function makePieceDraggable(piece) {
     dragOffset.y = coords.y - rect.top;
 
     piece.classList.add('dragging');
+    piece.style.pointerEvents = 'none'; // CRITICAL: Allows elementFromPoint to hit grid slots behind active piece
 
     let tag = piece.querySelector('.player-tag');
     if (!tag) {
@@ -348,7 +366,6 @@ function renderPieces(state) {
   const activeDrags = state.activeDrags || {};
 
   for (let i = 0; i < totalPieces; i++) {
-    // CRITICAL FOR IPAD: Skip processing the active piece currently being dragged locally
     if (activePiece && parseInt(activePiece.dataset.index) === i) {
       continue;
     }
