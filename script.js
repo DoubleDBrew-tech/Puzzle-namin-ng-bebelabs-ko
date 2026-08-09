@@ -261,13 +261,20 @@ function makePieceDraggable(piece) {
     const tag = piece.querySelector('.player-tag');
     if (tag) tag.remove();
 
+    // Temporarily hide the piece and disable its pointer events so elementFromPoint lands on the slot below
+    const origDisplay = piece.style.display;
+    const origPointerEvents = piece.style.pointerEvents;
+    piece.style.display = 'none';
+    piece.style.pointerEvents = 'none';
+
+    const dropElem = document.elementFromPoint(e.clientX, e.clientY);
+
+    // Restore styling
+    piece.style.display = origDisplay;
+    piece.style.pointerEvents = origPointerEvents;
     piece.style.position = 'relative';
     piece.style.left = '0px';
     piece.style.top = '0px';
-
-    piece.style.visibility = 'hidden';
-    const dropElem = document.elementFromPoint(e.clientX, e.clientY);
-    piece.style.visibility = 'visible';
 
     const slot = dropElem ? dropElem.closest('.slot') : null;
     const isOverTray = dropElem ? dropElem.closest('#tray') : null;
