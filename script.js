@@ -17,8 +17,18 @@ const boardSize = 600;
 const docRef = doc(db, "games", "puzzleState");
 
 let localState = null;
-let isDragging = false; 
 let currentGridSize = 4;
+let playerName = "Player";
+
+// Drag state tracking
+let activePiece = null;
+let dragOffset = { x: 0, y: 0 };
+
+// UI Elements
+const welcomeScreen = document.getElementById('welcomeScreen');
+const playerNameInput = document.getElementById('playerNameInput');
+const enterGameBtn = document.getElementById('enterGameBtn');
+const heartsContainer = document.getElementById('heartsContainer');
 
 const uploadBtn = document.getElementById('uploadBtn');
 const imageUpload = document.getElementById('imageUpload');
@@ -28,13 +38,36 @@ const board = document.getElementById('board');
 const tray = document.getElementById('tray');
 const gameStatus = document.getElementById('gameStatus');
 
-// Update board UI instantly when dropdown value changes
+// --- WELCOME SCREEN & HEARTS ANIMATION ---
+function initWelcomeScreen() {
+  // Create falling hearts & text
+  const items = ["💖", "💕", "❤️", "I Love Leigh", "Leigh ❤️", " Carlo ❤️"];
+  for (let i = 0; i < 25; i++) {
+    const item = document.createElement('div');
+    item.className = 'falling-item';
+    item.innerText = items[Math.floor(Math.random() * items.length)];
+    item.style.left = `${Math.random() * 100}vw`;
+    item.style.animationDuration = `${3 + Math.random() * 5}s`;
+    item.style.animationDelay = `${Math.random() * 3}s`;
+    item.style.fontSize = `${14 + Math.random() * 12}px`;
+    heartsContainer.appendChild(item);
+  }
+
+  enterGameBtn.addEventListener('click', () => {
+    const inputVal = playerNameInput.value.trim();
+    if (inputVal !== "") playerName = inputVal;
+    welcomeScreen.style.display = 'none';
+  });
+}
+
+initWelcomeScreen();
+
+// Grid selector listener
 gridSelect.addEventListener('change', () => {
-  const newSize = parseInt(gridSelect.value);
-  setupBoard(newSize);
+  setupBoard(parseInt(gridSelect.value));
 });
 
-// Downscale & compress image to lightweight JPEG string for fast Firestore sync
+// Image process helper
 function processImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -46,7 +79,6 @@ function processImage(file) {
         canvas.height = 500;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, 500, 500);
-        // Compressed JPEG keeps size small (~40KB)
         resolve(canvas.toDataURL('image/jpeg', 0.6));
       };
       img.onerror = () => reject("Failed to process image.");
@@ -57,7 +89,6 @@ function processImage(file) {
   });
 }
 
-// Build empty board slots dynamically
 function setupBoard(gridSize) {
   board.innerHTML = '';
   board.style.gridTemplateColumns = `repeat(${gridSize}, 1fr)`;
@@ -68,30 +99,93 @@ function setupBoard(gridSize) {
     const slot = document.createElement('div');
     slot.classList.add('slot');
     slot.dataset.index = i;
-    
-    slot.addEventListener('dragover', (e) => e.preventDefault());
-    slot.addEventListener('drop', (e) => handleDrop(e, `slot-${i}`));
     board.appendChild(slot);
   }
   
   tray.innerHTML = '';
-  tray.addEventListener('dragover', (e) => e.preventDefault());
-  tray.addEventListener('drop', (e) => handleDrop(e, 'tray'));
 }
 
-// Initial default grid setup
 setupBoard(currentGridSize);
 
-// Render puzzle pieces
+// --- TOUCH & MOUSE POINTER DRAG ENGINE ---
+function makePieceDraggable(piece) {
+  piece.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    activePiece = piece;
+    
+    // Set pointer capture for smooth tracking on iPad
+    piece.setPointerCapture(e.pointerId);
+    
+    const rect = piece.getBoundingClientRect();
+    dragOffset.x = e.clientX - rect.left;
+    dragOffset.y = e.clientY - rect.top;
+
+    piece.classList.add('dragging');
+    
+    // Attach Player Name Badge while dragging
+    let tag = piece.querySelector('.player-tag');
+    if (!tag) {
+      tag = document.createElement('div');
+      tag.className = 'player-tag';
+      piece.appendChild(tag);
+    }
+    tag.innerText = `Holding: ${playerName}`;
+
+    // Move piece to fixed positioning overlay while dragging
+    piece.style.position = 'fixed';
+    piece.style.left = `${e.clientX - dragOffset.x}px`;
+    piece.style.top = `${e.clientY - dragOffset.y}px`;
+  });
+
+  piece.addEventListener('pointermove', (e) => {
+    if (!activePiece || activePiece !== piece) return;
+    piece.style.left = `${e.clientX - dragOffset.x}px`;
+    piece.style.top = `${e.clientY - dragOffset.y}px`;
+  });
+
+  piece.addEventListener('pointerup', async (e) => {
+    if (!activePiece || activePiece !== piece) return;
+    
+    piece.releasePointerCapture(e.pointerId);
+    piece.classList.remove('dragging');
+    
+    // Remove Name Badge tag
+    const tag = piece.querySelector('.player-tag');
+    if (tag) tag.remove();
+
+    piece.style.position = 'relative';
+    piece.style.left = '0px';
+    piece.style.top = '0px';
+
+    // Find drop target under current finger/mouse location
+    piece.style.visibility = 'hidden';
+    const dropElem = document.elementFromPoint(e.clientX, e.clientY);
+    piece.style.visibility = 'visible';
+
+    const slot = dropElem ? dropElem.closest('.slot') : null;
+    const isOverTray = dropElem ? dropElem.closest('#tray') : null;
+
+    let targetLocation = 'tray';
+    if (slot) {
+      targetLocation = `slot-${slot.dataset.index}`;
+    } else if (!isOverTray) {
+      targetLocation = 'tray'; // Default back to tray if dropped outside
+    }
+
+    activePiece = null;
+    await updatePieceLocation(piece.dataset.index, targetLocation);
+  });
+}
+
+// Render puzzle state
 function renderPieces(state) {
   if (!state || !state.imageUrl) return;
-  if (isDragging) return; 
+  if (activePiece) return; // Prevent re-render glitches while user is actively dragging
 
   const gridSize = state.gridSize || 4;
   const totalPieces = gridSize * gridSize;
   const pieceSize = boardSize / gridSize;
 
-  // Sync dropdown UI to match state grid size
   if (gridSelect.value != gridSize) {
     gridSelect.value = gridSize;
   }
@@ -101,7 +195,6 @@ function renderPieces(state) {
     setupBoard(gridSize);
   }
 
-  // Generate pieces DOM elements if missing
   if (document.querySelectorAll('.piece').length !== totalPieces) {
     tray.innerHTML = '';
     for (let i = 0; i < totalPieces; i++) {
@@ -109,7 +202,6 @@ function renderPieces(state) {
       piece.classList.add('piece');
       piece.id = `piece-${i}`;
       piece.dataset.index = i;
-      piece.draggable = true;
       
       piece.style.width = `${pieceSize}px`;
       piece.style.height = `${pieceSize}px`;
@@ -120,19 +212,12 @@ function renderPieces(state) {
       piece.style.backgroundSize = `${boardSize}px ${boardSize}px`;
       piece.style.backgroundPosition = `-${col * pieceSize}px -${row * pieceSize}px`;
       
-      piece.addEventListener('dragstart', (e) => {
-        isDragging = true;
-        e.dataTransfer.setData('text/plain', i);
-      });
-      piece.addEventListener('dragend', () => {
-        isDragging = false;
-      });
-      
+      makePieceDraggable(piece);
       tray.appendChild(piece);
     }
   }
 
-  // Position pieces based on Firestore location
+  // Update piece positions from Firestore
   let correctCount = 0;
   for (let i = 0; i < totalPieces; i++) {
     const piece = document.getElementById(`piece-${i}`);
@@ -164,10 +249,8 @@ function checkWinCondition(correctCount, total) {
   }
 }
 
-async function handleDrop(e, targetLocation) {
-  e.preventDefault();
-  const pieceIndex = e.dataTransfer.getData('text/plain');
-  if (pieceIndex === "" || !localState || !localState.pieces) return;
+async function updatePieceLocation(pieceIndex, targetLocation) {
+  if (!localState || !localState.pieces) return;
   
   if (targetLocation.startsWith('slot-')) {
     const existingPieceIndex = Object.keys(localState.pieces).find(key => localState.pieces[key] === targetLocation);
@@ -192,7 +275,6 @@ uploadBtn.addEventListener('click', async () => {
   const totalPieces = gridSize * gridSize;
 
   gameStatus.innerText = "Creating puzzle pieces...";
-  gameStatus.style.color = "#d81b60";
   
   try {
     const dataUrl = await processImage(file);
@@ -209,11 +291,10 @@ uploadBtn.addEventListener('click', async () => {
     });
     
     document.querySelectorAll('.piece').forEach(p => p.remove());
-    gameStatus.innerText = "Puzzle ready! Move the pieces.";
+    gameStatus.innerText = "Puzzle ready! Touch and drag pieces to solve.";
   } catch (err) {
     console.error(err);
-    gameStatus.innerText = "Error loading picture. Try again!";
-    alert("Could not process picture. Please try another photo.");
+    alert("Could not process picture. Try another photo.");
   }
 });
 
@@ -229,7 +310,7 @@ resetBtn.addEventListener('click', async () => {
   }
 });
 
-// Real-time listener
+// Real-time Firestore sync
 onSnapshot(docRef, (docSnap) => {
   if (docSnap.exists()) {
     localState = docSnap.data();
