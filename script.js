@@ -50,7 +50,7 @@ const board = document.getElementById('board');
 const tray = document.getElementById('tray');
 const gameStatus = document.getElementById('gameStatus');
 
-// --- AUTH & USER SESSION PERSISTENCE ---
+// --- AUTH & PERSISTENCE ---
 function initAuth() {
   if (playerName) {
     displayName.innerText = playerName;
@@ -75,7 +75,6 @@ function initAuth() {
     welcomeScreen.style.display = 'flex';
   });
 
-  // Falling Hearts
   const items = ["💖", "💕", "❤️", "I Love Leigh", "Leigh ❤️", "Carlo ❤️"];
   const heartsContainer = document.getElementById('heartsContainer');
   for (let i = 0; i < 20; i++) {
@@ -91,38 +90,38 @@ function initAuth() {
 }
 initAuth();
 
-// --- MODALS (HINT & HISTORY) ---
+// --- MODALS ---
 hintBtn.addEventListener('click', () => {
   if (localState && localState.imageUrl) {
     hintImage.src = localState.imageUrl;
     hintModal.style.display = 'flex';
   } else {
-    alert("Upload a puzzle picture first!");
+    gameStatus.innerText = "⚠️ Upload a puzzle picture first!";
   }
 });
 closeHint.addEventListener('click', () => hintModal.style.display = 'none');
 
 historyBtn.addEventListener('click', async () => {
   historyModal.style.display = 'flex';
-  historyStats.innerHTML = "Fetching stats...";
+  historyStats.innerHTML = "Fetching history...";
   
   const snap = await getDoc(historyDocRef);
   if (snap.exists()) {
     const data = snap.data();
     historyStats.innerHTML = `
-      <div class="rank-card"><h3>🌱 2x2 Beginner Rank:</h3> <p>Completed: <strong>${data['rank_2'] || 0}</strong></p></div>
-      <div class="rank-card"><h3>🐣 3x3 Novice Rank:</h3> <p>Completed: <strong>${data['rank_3'] || 0}</strong></p></div>
-      <div class="rank-card"><h3>⭐ 4x4 Intermediate Rank:</h3> <p>Completed: <strong>${data['rank_4'] || 0}</strong></p></div>
-      <div class="rank-card"><h3>🔥 6x6 Advanced Rank:</h3> <p>Completed: <strong>${data['rank_6'] || 0}</strong></p></div>
-      <div class="rank-card"><h3>👑 10x10 Master Rank:</h3> <p>Completed: <strong>${data['rank_10'] || 0}</strong></p></div>
+      <div class="rank-card"><h3>🌱 2x2 Beginner:</h3> <p>Completed: <strong>${data['rank_2'] || 0}</strong></p></div>
+      <div class="rank-card"><h3>🐣 3x3 Novice:</h3> <p>Completed: <strong>${data['rank_3'] || 0}</strong></p></div>
+      <div class="rank-card"><h3>⭐ 4x4 Intermediate:</h3> <p>Completed: <strong>${data['rank_4'] || 0}</strong></p></div>
+      <div class="rank-card"><h3>🔥 6x6 Advanced:</h3> <p>Completed: <strong>${data['rank_6'] || 0}</strong></p></div>
+      <div class="rank-card"><h3>👑 10x10 Master:</h3> <p>Completed: <strong>${data['rank_10'] || 0}</strong></p></div>
     `;
   } else {
-    historyStats.innerHTML = "<p>No puzzles completed yet. Be the first to finish one!</p>";
+    historyStats.innerHTML = "<p>No puzzles completed yet!</p>";
   }
 });
 closeHistory.addEventListener('click', () => historyModal.style.display = 'none');
 
-// Image processing helper
+// Image processor
 function processImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -144,6 +143,16 @@ function processImage(file) {
   });
 }
 
+// Fisher-Yates shuffle generator
+function generateShuffledOrder(total) {
+  const arr = Array.from({ length: total }, (_, i) => i);
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 function setupBoard(gridSize) {
   board.innerHTML = '';
   board.style.gridTemplateColumns = `repeat(${gridSize}, 1fr)`;
@@ -160,7 +169,7 @@ function setupBoard(gridSize) {
 }
 setupBoard(currentGridSize);
 
-// --- DRAG ENGINE & POSITION SYNC ---
+// --- DRAG ENGINE & REAL-TIME SYNC ---
 function makePieceDraggable(piece) {
   piece.addEventListener('pointerdown', (e) => {
     e.preventDefault();
@@ -213,7 +222,6 @@ function makePieceDraggable(piece) {
     } else if (isOverTray) {
       targetLocation = 'tray';
     } else {
-      // Keep inside current slot or tray if dropped off-screen
       targetLocation = localState.pieces[piece.dataset.index] || 'tray';
     }
 
@@ -222,6 +230,7 @@ function makePieceDraggable(piece) {
   });
 }
 
+// Render pieces using deterministic trayOrder from Firebase
 function renderPieces(state) {
   if (!state || !state.imageUrl) return;
   if (activePiece) return;
@@ -237,6 +246,7 @@ function renderPieces(state) {
     setupBoard(gridSize);
   }
 
+  // Create pieces if DOM count mismatches
   if (document.querySelectorAll('.piece').length !== totalPieces) {
     tray.innerHTML = '';
     for (let i = 0; i < totalPieces; i++) {
@@ -259,26 +269,41 @@ function renderPieces(state) {
     }
   }
 
-  // Update piece positions from database
+  // Position pieces on board or inside tray following state.trayOrder
+  const trayOrder = state.trayOrder || Array.from({ length: totalPieces }, (_, i) => i);
+  
+  // Clear tray to re-render in correct order
+  tray.innerHTML = '';
+  
+  // 1. First append tray pieces in shuffled order
+  trayOrder.forEach((pieceIdx) => {
+    const piece = document.getElementById(`piece-${pieceIdx}`);
+    if (!piece) return;
+    const loc = state.pieces ? state.pieces[pieceIdx] : 'tray';
+    if (loc === 'tray' || !loc) {
+      tray.appendChild(piece);
+    }
+  });
+
+  // 2. Append board pieces to their respective slots
   for (let i = 0; i < totalPieces; i++) {
     const piece = document.getElementById(`piece-${i}`);
     if (!piece) continue;
-
-    const location = state.pieces ? state.pieces[i] : 'tray';
-    if (location === 'tray' || !location) {
-      tray.appendChild(piece);
-    } else if (location.startsWith('slot-')) {
-      const slotIndex = location.split('-')[1];
+    const loc = state.pieces ? state.pieces[i] : 'tray';
+    if (loc && loc.startsWith('slot-')) {
+      const slotIndex = loc.split('-')[1];
       const slot = document.querySelector(`.slot[data-index="${slotIndex}"]`);
       if (slot) slot.appendChild(piece);
     }
   }
 
   if (state.completed) {
-    gameStatus.innerText = "🎉 Puzzle Completed & Logged in History! 🎉";
+    board.classList.add('celebrate-win');
+    gameStatus.innerText = state.winnerText || "🎉 Puzzle Complete!";
     gameStatus.style.color = "#4caf50";
   } else {
-    gameStatus.innerText = "Drag pieces to solve, then click Finish Puzzle!";
+    board.classList.remove('celebrate-win', 'shake-error');
+    gameStatus.innerText = "Drag randomized pieces to solve, then click Finish Puzzle!";
     gameStatus.style.color = "#d81b60";
   }
 }
@@ -286,15 +311,52 @@ function renderPieces(state) {
 async function updatePieceLocation(pieceIndex, targetLocation) {
   if (!localState || !localState.pieces) return;
   
+  localState.placedBy = localState.placedBy || {};
+
   if (targetLocation.startsWith('slot-')) {
+    // If a piece already exists in that slot, send it back to tray
     const existingPieceIndex = Object.keys(localState.pieces).find(key => localState.pieces[key] === targetLocation);
     if (existingPieceIndex !== undefined && existingPieceIndex !== pieceIndex) {
       localState.pieces[existingPieceIndex] = 'tray'; 
+      delete localState.placedBy[existingPieceIndex];
     }
+    // Record who placed this piece
+    localState.placedBy[pieceIndex] = playerName;
+  } else {
+    delete localState.placedBy[pieceIndex];
   }
 
   localState.pieces[pieceIndex] = targetLocation;
-  await setDoc(docRef, { pieces: localState.pieces }, { merge: true });
+  await setDoc(docRef, { pieces: localState.pieces, placedBy: localState.placedBy }, { merge: true });
+}
+
+// Trigger celebratory particle explosion
+function triggerCelebration() {
+  const overlay = document.getElementById('celebrationOverlay');
+  overlay.innerHTML = '';
+  const emojis = ['🏆', '💖', '⭐', '🎉', '👑', '❤️', '✨'];
+  
+  for (let i = 0; i < 40; i++) {
+    const item = document.createElement('div');
+    item.className = 'celebration-item';
+    item.innerText = emojis[Math.floor(Math.random() * emojis.length)];
+    item.style.left = '50vw';
+    item.style.top = '50vh';
+    
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 150 + Math.random() * 350;
+    const tx = Math.cos(angle) * dist;
+    const ty = Math.sin(angle) * dist;
+    const rot = Math.random() * 720;
+    
+    item.style.setProperty('--tx', `${tx}px`);
+    item.style.setProperty('--ty', `${ty}px`);
+    item.style.setProperty('--rot', `${rot}deg`);
+    
+    overlay.appendChild(item);
+  }
+  
+  setTimeout(() => overlay.innerHTML = '', 2500);
 }
 
 // --- SUBMIT / FINISH PUZZLE LOGIC ---
@@ -306,25 +368,67 @@ finishBtn.addEventListener('click', async () => {
   let correctCount = 0;
 
   for (let i = 0; i < totalPieces; i++) {
-    const loc = localState.pieces[i];
-    if (loc === `slot-${i}`) correctCount++;
+    if (localState.pieces[i] === `slot-${i}`) {
+      correctCount++;
+    }
   }
 
   if (correctCount === totalPieces) {
-    alert(`🎉 Congratulations ${playerName}! You correctly solved the ${gridSize}x${gridSize} puzzle!`);
+    // Tally correct placements per player
+    const tally = {};
+    const placedBy = localState.placedBy || {};
     
-    // Mark completed & increment rank history in database
-    await setDoc(docRef, { completed: true }, { merge: true });
+    for (let i = 0; i < totalPieces; i++) {
+      const author = placedBy[i] || "Anonymous";
+      tally[author] = (tally[author] || 0) + 1;
+    }
+
+    // Determine winner/MVP
+    let topPlayer = "";
+    let maxPlaced = -1;
+    let isTie = false;
+
+    Object.entries(tally).forEach(([player, count]) => {
+      if (count > maxPlaced) {
+        maxPlaced = count;
+        topPlayer = player;
+        isTie = false;
+      } else if (count === maxPlaced) {
+        isTie = true;
+      }
+    });
+
+    let winnerMsg = "";
+    if (isTie) {
+      winnerMsg = `🎉 Complete! It's a tie! Both placed equal pieces. ❤️`;
+    } else {
+      winnerMsg = `🎉 Complete! ${topPlayer} placed the most pieces (${maxPlaced}/${totalPieces})! 👑`;
+    }
+
+    triggerCelebration();
+
+    await setDoc(docRef, { 
+      completed: true, 
+      winnerText: winnerMsg 
+    }, { merge: true });
     
     const rankKey = `rank_${gridSize}`;
     try {
       await updateDoc(historyDocRef, { [rankKey]: increment(1) });
     } catch (e) {
-      // Initialize document if missing
       await setDoc(historyDocRef, { [rankKey]: 1 }, { merge: true });
     }
+
   } else {
-    alert(`❌ Puzzle is not finished yet! (${correctCount}/${totalPieces} pieces are in the correct place)`);
+    // Vibrate/Shake board on error
+    board.classList.remove('shake-error');
+    void board.offsetWidth; // Force CSS reflow
+    board.classList.add('shake-error');
+
+    gameStatus.innerText = `❌ Incorrect! (${correctCount}/${totalPieces} pieces are in the right spot)`;
+    gameStatus.style.color = "#f44336";
+
+    setTimeout(() => board.classList.remove('shake-error'), 600);
   }
 });
 
@@ -332,19 +436,19 @@ finishBtn.addEventListener('click', async () => {
 uploadBtn.addEventListener('click', async () => {
   const file = imageUpload.files[0];
   if (!file) {
-    alert("Please choose a picture first!");
+    gameStatus.innerText = "⚠️ Please select a picture first!";
     return;
   }
   
   const gridSize = parseInt(gridSelect.value);
   const totalPieces = gridSize * gridSize;
 
-  gameStatus.innerText = "Creating randomized puzzle...";
+  gameStatus.innerText = "Processing & shuffling picture...";
   
   try {
     const dataUrl = await processImage(file);
+    const trayOrder = generateShuffledOrder(totalPieces);
     
-    // Create array of randomized tray slots
     const initialPieces = {};
     for (let i = 0; i < totalPieces; i++) {
       initialPieces[i] = 'tray';
@@ -354,27 +458,39 @@ uploadBtn.addEventListener('click', async () => {
       imageUrl: dataUrl,
       gridSize: gridSize,
       pieces: initialPieces,
-      completed: false
+      trayOrder: trayOrder,
+      placedBy: {},
+      completed: false,
+      winnerText: ""
     });
     
     document.querySelectorAll('.piece').forEach(p => p.remove());
     gameStatus.innerText = "Puzzle ready!";
   } catch (err) {
-    alert("Error processing picture. Try another image.");
+    gameStatus.innerText = "Error processing image. Try another photo.";
   }
 });
 
 resetBtn.addEventListener('click', async () => {
   if (localState && localState.gridSize) {
     const totalPieces = localState.gridSize * localState.gridSize;
+    const trayOrder = generateShuffledOrder(totalPieces);
+    
     const initialPieces = {};
     for (let i = 0; i < totalPieces; i++) {
       initialPieces[i] = 'tray';
     }
-    await setDoc(docRef, { pieces: initialPieces, completed: false }, { merge: true });
+    await setDoc(docRef, { 
+      pieces: initialPieces, 
+      trayOrder: trayOrder,
+      placedBy: {}, 
+      completed: false,
+      winnerText: ""
+    }, { merge: true });
   }
 });
 
+// Real-time listener
 onSnapshot(docRef, (docSnap) => {
   if (docSnap.exists()) {
     localState = docSnap.data();
