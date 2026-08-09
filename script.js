@@ -225,8 +225,8 @@ function resetPieceStyles(piece) {
   piece.style.position = 'relative';
   piece.style.left = '';
   piece.style.top = '';
-  piece.style.width = '100%';
-  piece.style.height = '100%';
+  piece.style.width = '';
+  piece.style.height = '';
   piece.style.pointerEvents = 'auto';
 
   const tag = piece.querySelector('.player-tag');
@@ -397,9 +397,13 @@ function renderPieces(state) {
 
     const row = Math.floor(i / gridSize);
     const col = i % gridSize;
+    
+    // Percentage-based background scaling to align cleanly in slot grid
     piece.style.backgroundImage = `url("${state.imageUrl}")`;
-    piece.style.backgroundSize = `${boardSize}px ${boardSize}px`;
-    piece.style.backgroundPosition = `-${col * pieceSize}px -${row * pieceSize}px`;
+    piece.style.backgroundSize = `${gridSize * 100}% ${gridSize * 100}%`;
+    piece.style.backgroundPosition = gridSize > 1 
+      ? `${(col / (gridSize - 1)) * 100}% ${(row / (gridSize - 1)) * 100}%` 
+      : `0% 0%`;
 
     const holdingPlayer = activeDrags[pKey];
     let tag = piece.querySelector('.player-tag');
@@ -434,6 +438,9 @@ function renderPieces(state) {
         tray.appendChild(piece);
         resetPieceStyles(piece);
       }
+      // Give tray pieces their explicit size
+      piece.style.width = `${pieceSize}px`;
+      piece.style.height = `${pieceSize}px`;
     }
   }
 
