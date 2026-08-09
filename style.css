@@ -3,13 +3,69 @@ body {
   text-align: center;
   background-color: #ffe4e8;
   margin: 0;
-  padding: 20px;
+  padding: 15px;
   user-select: none;
   -webkit-user-select: none;
   overflow-x: hidden;
 }
 
-/* Welcome Screen Overlay */
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  max-width: 1000px;
+  margin: 0 auto 15px auto;
+}
+
+h1 { color: #d81b60; margin: 0; }
+
+#playerBar {
+  font-size: 0.95em;
+  color: #880e4f;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Modals */
+.modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 10000;
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-content {
+  background: #fff;
+  padding: 20px;
+  border-radius: 15px;
+  max-width: 90%;
+  max-height: 85vh;
+  overflow-y: auto;
+  position: relative;
+  box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+}
+
+.close-btn {
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  font-size: 28px;
+  cursor: pointer;
+  color: #888;
+}
+
+#hintImage {
+  max-width: 100%;
+  max-height: 60vh;
+  border-radius: 10px;
+  margin-top: 10px;
+}
+
+/* Welcome Overlay */
 #welcomeScreen {
   position: fixed;
   inset: 0;
@@ -18,7 +74,6 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
-  overflow: hidden;
 }
 
 .welcome-card {
@@ -29,11 +84,6 @@ body {
   z-index: 10;
   max-width: 320px;
   width: 90%;
-}
-
-.welcome-card h1 {
-  color: #d81b60;
-  margin-top: 0;
 }
 
 .welcome-card input {
@@ -59,13 +109,7 @@ body {
   cursor: pointer;
 }
 
-/* Falling Hearts & Text */
-#heartsContainer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
+#heartsContainer { position: absolute; inset: 0; pointer-events: none; }
 .falling-item {
   position: absolute;
   top: -50px;
@@ -73,7 +117,6 @@ body {
   font-weight: bold;
   opacity: 0.8;
   animation: fall linear infinite;
-  white-space: nowrap;
 }
 
 @keyframes fall {
@@ -81,14 +124,13 @@ body {
   100% { transform: translateY(105vh) rotate(360deg); opacity: 0.2; }
 }
 
-/* Controls & Game Area */
-h1 { color: #d81b60; margin-bottom: 10px; }
+/* Controls & Buttons */
 #controls {
-  margin-bottom: 20px;
+  margin-bottom: 15px;
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -107,6 +149,14 @@ button {
   font-weight: bold;
 }
 
+button:hover { background-color: #e91e63; }
+.sec-btn { background-color: #78909c; }
+.sec-btn:hover { background-color: #546e7a; }
+.action-btn { background-color: #ab47bc; }
+.action-btn:hover { background-color: #8e24aa; }
+.finish-btn { background-color: #4caf50; }
+.finish-btn:hover { background-color: #388e3c; }
+
 #gameStatus {
   font-size: 1.2em;
   margin-bottom: 15px;
@@ -118,7 +168,7 @@ button {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  gap: 30px;
+  gap: 20px;
   flex-wrap: wrap;
 }
 
@@ -157,13 +207,12 @@ button {
   position: relative;
 }
 
-/* Puzzle Piece with Touch Action Fix */
 .piece {
   cursor: grab;
   box-sizing: border-box;
   border: 1px solid rgba(255, 255, 255, 0.5);
   box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-  touch-action: none; /* Prevents iPad page scrolling while dragging */
+  touch-action: none;
   position: relative;
 }
 
@@ -174,7 +223,6 @@ button {
   box-shadow: 0 8px 20px rgba(0,0,0,0.4);
 }
 
-/* Name Tag Badge on Active Drag */
 .player-tag {
   position: absolute;
   top: -22px;
@@ -188,5 +236,15 @@ button {
   border-radius: 10px;
   white-space: nowrap;
   pointer-events: none;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
 }
+
+/* History List Styling */
+.rank-card {
+  background: #fff0f3;
+  border: 1px solid #f8bbd0;
+  padding: 12px;
+  margin: 10px 0;
+  border-radius: 8px;
+  text-align: left;
+}
+.rank-card h3 { margin: 0 0 5px 0; color: #c2185b; }
