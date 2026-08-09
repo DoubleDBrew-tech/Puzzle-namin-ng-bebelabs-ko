@@ -2,12 +2,25 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>Para kay Leigh</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>💖 For u bebelabs 💖</h1>
+
+  <!-- Welcome Modal -->
+  <div id="welcomeScreen">
+    <div id="heartsContainer"></div>
+    <div class="welcome-card">
+      <h1>💖 Live, Laugh, Love Leigh 💖</h1>
+      <p>Enter your name!</p>
+      <input type="text" id="playerNameInput" placeholder="Enter your name..." maxlength="15">
+      <button id="enterGameBtn">Start Playing ❤️</button>
+    </div>
+  </div>
+
+  <!-- Game Header & Controls -->
+  <h1>💖 Live, Laugh, Love Leigh 💖</h1>
   
   <div id="controls">
     <label for="gridSelect"><strong>Pieces:</strong></label>
@@ -16,7 +29,7 @@
       <option value="3">3x3 (9 pieces)</option>
       <option value="4" selected>4x4 (16 pieces)</option>
       <option value="6">6x6 (36 pieces)</option>
-      <option value="10">10x10 (100 pieces)</option>
+      <option value="10">10x10 (100 pieces! 🔥)</option>
     </select>
 
     <input type="file" id="imageUpload" accept="image/*">
@@ -31,7 +44,6 @@
     <div id="tray"></div>
   </div>
 
-  <!-- Added ?v=2 to bypass browser cache -->
-  <script type="module" src="script.js?v=2"></script>
+  <script type="module" src="script.js?v=3"></script>
 </body>
 </html>
