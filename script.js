@@ -79,15 +79,18 @@ function initAuth() {
 
   const items = ["💖", "💕", "❤️", "I Love Leigh", "Leigh ❤️", "Carlo ❤️"];
   const heartsContainer = document.getElementById('heartsContainer');
-  for (let i = 0; i < 20; i++) {
-    const item = document.createElement('div');
-    item.className = 'falling-item';
-    item.innerText = items[Math.floor(Math.random() * items.length)];
-    item.style.left = `${Math.random() * 100}vw`;
-    item.style.animationDuration = `${3 + Math.random() * 5}s`;
-    item.style.animationDelay = `${Math.random() * 3}s`;
-    item.style.fontSize = `${14 + Math.random() * 12}px`;
-    heartsContainer.appendChild(item);
+  if (heartsContainer) {
+    heartsContainer.innerHTML = '';
+    for (let i = 0; i < 20; i++) {
+      const item = document.createElement('div');
+      item.className = 'falling-item';
+      item.innerText = items[Math.floor(Math.random() * items.length)];
+      item.style.left = `${Math.random() * 100}vw`;
+      item.style.animationDuration = `${3 + Math.random() * 5}s`;
+      item.style.animationDelay = `${Math.random() * 3}s`;
+      item.style.fontSize = `${14 + Math.random() * 12}px`;
+      heartsContainer.appendChild(item);
+    }
   }
 }
 initAuth();
@@ -98,18 +101,23 @@ historyBtn.addEventListener('click', async () => {
   historyPage.style.display = 'block';
   historyStats.innerHTML = "<p>Fetching achievements...</p>";
   
-  const snap = await getDoc(historyDocRef);
-  if (snap.exists()) {
-    const data = snap.data();
-    historyStats.innerHTML = `
-      <div class="rank-card"><h3>🌱 2x2 Beginner Rank</h3> <p>Completed: <strong>${data['rank_2'] || 0}</strong></p></div>
-      <div class="rank-card"><h3>🐣 3x3 Novice Rank</h3> <p>Completed: <strong>${data['rank_3'] || 0}</strong></p></div>
-      <div class="rank-card"><h3>⭐ 4x4 Intermediate Rank</h3> <p>Completed: <strong>${data['rank_4'] || 0}</strong></p></div>
-      <div class="rank-card"><h3>🔥 6x6 Advanced Rank</h3> <p>Completed: <strong>${data['rank_6'] || 0}</strong></p></div>
-      <div class="rank-card"><h3>👑 10x10 Master Rank</h3> <p>Completed: <strong>${data['rank_10'] || 0}</strong></p></div>
-    `;
-  } else {
-    historyStats.innerHTML = "<p>No puzzles completed yet!</p>";
+  try {
+    const snap = await getDoc(historyDocRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      historyStats.innerHTML = `
+        <div class="rank-card"><h3>🌱 2x2 Beginner Rank</h3> <p>Completed: <strong>${data['rank_2'] || 0}</strong></p></div>
+        <div class="rank-card"><h3>🐣 3x3 Novice Rank</h3> <p>Completed: <strong>${data['rank_3'] || 0}</strong></p></div>
+        <div class="rank-card"><h3>⭐ 4x4 Intermediate Rank</h3> <p>Completed: <strong>${data['rank_4'] || 0}</strong></p></div>
+        <div class="rank-card"><h3>🔥 6x6 Advanced Rank</h3> <p>Completed: <strong>${data['rank_6'] || 0}</strong></p></div>
+        <div class="rank-card"><h3>👑 10x10 Master Rank</h3> <p>Completed: <strong>${data['rank_10'] || 0}</strong></p></div>
+      `;
+    } else {
+      historyStats.innerHTML = "<p>No puzzles completed yet!</p>";
+    }
+  } catch (err) {
+    console.error("Error fetching history:", err);
+    historyStats.innerHTML = "<p>Failed to load achievements.</p>";
   }
 });
 
@@ -189,23 +197,29 @@ gridSelect.addEventListener('change', async () => {
   setupBoard(newSize);
   document.querySelectorAll('.piece').forEach(p => p.remove());
 
-  if (localState && localState.imageUrl) {
-    await setDoc(docRef, {
-      gridSize: newSize,
-      pieces: initialPieces,
-      trayOrder: trayOrder,
-      placedBy: {},
-      completed: false,
-      winnerText: ""
-    }, { merge: true });
-  } else {
-    await setDoc(docRef, { gridSize: newSize }, { merge: true });
-  }
+  // Broadcast grid changes to all connected players immediately
+  await setDoc(docRef, {
+    gridSize: newSize,
+    pieces: initialPieces,
+    trayOrder: trayOrder,
+    placedBy: {},
+    activeDrags: {},
+    completed: false,
+    winnerText: ""
+  }, { merge: true });
 });
 
 // --- DRAG ENGINE & REAL-TIME SYNC ---
 function makePieceDraggable(piece) {
-  piece.addEventListener('pointerdown', (e) => {
+  piece.addEventListener('pointerdown', async (e) => {
+    const pieceIdx = piece.dataset.index;
+    const pKey = `p_${pieceIdx}`;
+
+    // Prevent dragging if someone else is actively holding it
+    if (localState?.activeDrags?.[pKey] && localState.activeDrags[pKey] !== playerName) {
+      return;
+    }
+
     e.preventDefault();
     activePiece = piece;
     piece.setPointerCapture(e.pointerId);
@@ -225,6 +239,17 @@ function makePieceDraggable(piece) {
     piece.style.top = `${e.clientY - dragOffset.y}px`;
     
     document.body.appendChild(piece);
+
+    // Sync active drag status to Firestore
+    try {
+      await setDoc(docRef, {
+        activeDrags: {
+          [pKey]: playerName
+        }
+      }, { merge: true });
+    } catch (err) {
+      console.error("Drag start sync error:", err);
+    }
   });
 
   piece.addEventListener('pointermove', (e) => {
@@ -283,26 +308,39 @@ function makePieceDraggable(piece) {
 }
 
 function renderPieces(state) {
-  if (!state || !state.imageUrl) return;
+  if (!state) return;
   
   const gridSize = state.gridSize || 4;
   const totalPieces = gridSize * gridSize;
-  const pieceSize = boardSize / gridSize;
 
+  // Sync grid dropdown control
   if (gridSelect.value != gridSize) {
     gridSelect.value = gridSize;
   }
 
+  // Update board grid layout immediately
   if (currentGridSize !== gridSize || board.children.length !== totalPieces) {
     currentGridSize = gridSize;
     setupBoard(gridSize);
     document.querySelectorAll('.piece').forEach(p => p.remove());
   }
 
+  // If no image uploaded yet, show ready state
+  if (!state.imageUrl) {
+    tray.innerHTML = '';
+    gameStatus.innerText = "Select pieces & upload an image!";
+    gameStatus.style.color = "#d81b60";
+    return;
+  }
+
+  const pieceSize = boardSize / gridSize;
   const piecesData = state.pieces || {};
+  const activeDrags = state.activeDrags || {};
 
   for (let i = 0; i < totalPieces; i++) {
+    const pKey = `p_${i}`;
     let piece = document.getElementById(`piece-${i}`);
+    
     if (!piece) {
       piece = document.createElement('div');
       piece.classList.add('piece');
@@ -323,7 +361,27 @@ function renderPieces(state) {
 
     if (activePiece && activePiece.dataset.index == i) continue;
 
-    const loc = piecesData[`p_${i}`] || 'tray';
+    // Indicate live holding status for other connected players
+    const holdingPlayer = activeDrags[pKey];
+    let tag = piece.querySelector('.player-tag');
+    if (holdingPlayer && holdingPlayer !== playerName) {
+      if (!tag) {
+        tag = document.createElement('div');
+        tag.className = 'player-tag';
+        piece.appendChild(tag);
+      }
+      tag.innerText = `Holding: ${holdingPlayer}`;
+      piece.style.opacity = '0.6';
+      piece.style.pointerEvents = 'none';
+    } else {
+      if (tag && !piece.classList.contains('dragging')) {
+        tag.remove();
+      }
+      piece.style.opacity = '1';
+      piece.style.pointerEvents = 'auto';
+    }
+
+    const loc = piecesData[pKey] || 'tray';
 
     if (loc.startsWith('slot-')) {
       const slotIndex = loc.split('-')[1];
@@ -337,6 +395,13 @@ function renderPieces(state) {
       }
     }
   }
+
+  // Remove stale piece elements from previous larger grid sizes
+  document.querySelectorAll('.piece').forEach(p => {
+    if (parseInt(p.dataset.index) >= totalPieces) {
+      p.remove();
+    }
+  });
 
   const trayOrder = state.trayOrder || Array.from({ length: totalPieces }, (_, i) => i);
   trayOrder.forEach((pieceIdx) => {
@@ -362,6 +427,7 @@ async function updatePieceLocation(pieceIndex, targetLocation) {
   
   localState.pieces = localState.pieces || {};
   localState.placedBy = localState.placedBy || {};
+  localState.activeDrags = localState.activeDrags || {};
   
   const pKey = `p_${pieceIndex}`;
 
@@ -378,11 +444,13 @@ async function updatePieceLocation(pieceIndex, targetLocation) {
   }
 
   localState.pieces[pKey] = targetLocation;
+  delete localState.activeDrags[pKey];
   
   try {
     await setDoc(docRef, { 
       pieces: localState.pieces, 
-      placedBy: localState.placedBy 
+      placedBy: localState.placedBy,
+      activeDrags: localState.activeDrags
     }, { merge: true });
   } catch (err) {
     console.error("Firestore sync error:", err);
@@ -391,6 +459,7 @@ async function updatePieceLocation(pieceIndex, targetLocation) {
 
 function triggerCelebration() {
   const overlay = document.getElementById('celebrationOverlay');
+  if (!overlay) return;
   overlay.innerHTML = '';
   const emojis = ['🏆', '💖', '⭐', '🎉', '👑', '❤️', '✨'];
   
@@ -514,6 +583,7 @@ uploadBtn.addEventListener('click', async () => {
       pieces: initialPieces,
       trayOrder: trayOrder,
       placedBy: {},
+      activeDrags: {},
       completed: false,
       winnerText: ""
     });
@@ -537,7 +607,8 @@ resetBtn.addEventListener('click', async () => {
     await setDoc(docRef, { 
       pieces: initialPieces, 
       trayOrder: trayOrder,
-      placedBy: {}, 
+      placedBy: {},
+      activeDrags: {},
       completed: false,
       winnerText: ""
     }, { merge: true });
