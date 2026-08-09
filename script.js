@@ -136,7 +136,7 @@ hintBtn.addEventListener('click', () => {
 });
 closeHint.addEventListener('click', () => hintModal.style.display = 'none');
 
-// Image processing helper
+// Compressed Image processing helper (ensures fast payload transfer & reliable Firestore saving)
 function processImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -144,11 +144,11 @@ function processImage(file) {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        canvas.width = 500;
-        canvas.height = 500;
+        canvas.width = 400;
+        canvas.height = 400;
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, 500, 500);
-        resolve(canvas.toDataURL('image/jpeg', 0.6));
+        ctx.drawImage(img, 0, 0, 400, 400);
+        resolve(canvas.toDataURL('image/jpeg', 0.5));
       };
       img.onerror = reject;
       img.src = e.target.result;
@@ -229,7 +229,7 @@ function makePieceDraggable(piece) {
     piece.classList.add('dragging');
     let tag = piece.querySelector('.player-tag') || document.createElement('div');
     tag.className = 'player-tag';
-    tag.innerText = `Holding: ${playerName}`;
+    tag.innerText = `Holding: ${playerName || "Player"}`;
     piece.appendChild(tag);
 
     piece.style.position = 'fixed';
@@ -239,9 +239,9 @@ function makePieceDraggable(piece) {
     document.body.appendChild(piece);
 
     try {
-      await updateDoc(docRef, {
-        [`activeDrags.${pKey}`]: playerName
-      });
+      await setDoc(docRef, {
+        [`activeDrags.${pKey}`]: playerName || "Player"
+      }, { merge: true });
     } catch (err) {
       console.error("Drag start sync error:", err);
     }
@@ -413,8 +413,6 @@ function renderPieces(state) {
 }
 
 async function updatePieceLocation(pieceIndex, targetLocation) {
-  if (!localState) return;
-
   const pKey = `p_${pieceIndex}`;
   const updates = {};
 
@@ -422,7 +420,7 @@ async function updatePieceLocation(pieceIndex, targetLocation) {
   updates[`activeDrags.${pKey}`] = deleteField();
 
   if (targetLocation.startsWith('slot-')) {
-    if (localState.pieces) {
+    if (localState && localState.pieces) {
       Object.keys(localState.pieces).forEach(k => {
         if (localState.pieces[k] === targetLocation && k !== pKey) {
           updates[`pieces.${k}`] = 'tray';
@@ -430,15 +428,16 @@ async function updatePieceLocation(pieceIndex, targetLocation) {
         }
       });
     }
-    updates[`placedBy.${pKey}`] = playerName;
+    updates[`placedBy.${pKey}`] = playerName || "Anonymous";
   } else {
     updates[`placedBy.${pKey}`] = deleteField();
   }
 
   try {
-    await updateDoc(docRef, updates);
+    await setDoc(docRef, updates, { merge: true });
   } catch (err) {
     console.error("Firestore sync error:", err);
+    gameStatus.innerText = "⚠️ Network error saving move.";
   }
 }
 
@@ -514,10 +513,10 @@ finishBtn.addEventListener('click', async () => {
 
     triggerCelebration();
 
-    await updateDoc(docRef, { 
+    await setDoc(docRef, { 
       completed: true, 
       winnerText: winnerMsg 
-    });
+    }, { merge: true });
     
     const rankKey = `rank_${gridSize}`;
     try {
@@ -549,7 +548,7 @@ uploadBtn.addEventListener('click', async () => {
   const gridSize = parseInt(gridSelect.value);
   const totalPieces = gridSize * gridSize;
 
-  gameStatus.innerText = "Processing & shuffling picture...";
+  gameStatus.innerText = "Processing & saving picture...";
   
   try {
     const dataUrl = await processImage(file);
@@ -573,9 +572,12 @@ uploadBtn.addEventListener('click', async () => {
       winnerText: ""
     });
     
-    gameStatus.innerText = "Puzzle ready!";
+    gameStatus.innerText = "Puzzle saved & synced for all devices!";
+    gameStatus.style.color = "#4caf50";
   } catch (err) {
-    gameStatus.innerText = "Error processing image. Try another photo.";
+    console.error("Upload error:", err);
+    gameStatus.innerText = "❌ Error saving image. Check database rules/connection.";
+    gameStatus.style.color = "#f44336";
   }
 });
 
@@ -600,10 +602,24 @@ resetBtn.addEventListener('click', async () => {
   }
 });
 
-// Real-time Firestore listener
+// Real-time Firestore listener with automatic fallback initialization
 onSnapshot(docRef, (docSnap) => {
   if (docSnap.exists()) {
     localState = docSnap.data();
     renderPieces(localState);
+  } else {
+    setDoc(docRef, {
+      gridSize: 4,
+      pieces: {},
+      trayOrder: [],
+      placedBy: {},
+      activeDrags: {},
+      completed: false,
+      winnerText: "",
+      imageUrl: ""
+    }, { merge: true });
   }
+}, (err) => {
+  console.error("Realtime sync error:", err);
+  gameStatus.innerText = "❌ Sync error: " + err.message;
 });
