@@ -8,7 +8,7 @@
 </head>
 <body>
 
-  <!-- Welcome Modal -->
+  <!-- PAGE 1: Welcome Overlay -->
   <div id="welcomeScreen">
     <div id="heartsContainer"></div>
     <div class="welcome-card">
@@ -28,52 +28,57 @@
     </div>
   </div>
 
-  <!-- History & Achievements Modal -->
-  <div id="historyModal" class="modal">
-    <div class="modal-content">
-      <span id="closeHistory" class="close-btn">&times;</span>
-      <h2>🏆 Solved Puzzle History</h2>
-      <div id="historyStats">Loading history...</div>
-    </div>
-  </div>
-
   <!-- Celebration Explosion Overlay -->
   <div id="celebrationOverlay"></div>
 
-  <!-- Header & Controls -->
-  <header>
-    <h1>💖 Live, Laugh, Love Leigh 💖</h1>
-    <div id="playerBar">
-      <span>Logged in as: <strong id="displayName"></strong></span>
-      <button id="leaveBtn" class="sec-btn">Leave Game</button>
+  <!-- PAGE 2: Main Game Page -->
+  <div id="gameScreen">
+    <header>
+      <h1>💖 Live, Laugh, Love Leigh 💖</h1>
+      <div id="playerBar">
+        <span>Logged in as: <strong id="displayName"></strong></span>
+        <button id="leaveBtn" class="sec-btn">Leave Game</button>
+      </div>
+    </header>
+    
+    <div id="controls">
+      <label for="gridSelect"><strong>Pieces:</strong></label>
+      <select id="gridSelect">
+        <option value="2">2x2 (4 pieces)</option>
+        <option value="3">3x3 (9 pieces)</option>
+        <option value="4" selected>4x4 (16 pieces)</option>
+        <option value="6">6x6 (36 pieces)</option>
+        <option value="10">10x10 (100 pieces)</option>
+      </select>
+
+      <input type="file" id="imageUpload" accept="image/*">
+      <button id="uploadBtn">Upload & Start</button>
+      <button id="resetBtn" class="sec-btn">Reset Puzzle</button>
+      <button id="hintBtn" class="action-btn">💡 Hint</button>
+      <button id="finishBtn" class="finish-btn">✅ Finish Puzzle</button>
+      <button id="historyBtn" class="action-btn">🏆 History</button>
     </div>
-  </header>
-  
-  <div id="controls">
-    <label for="gridSelect"><strong>Pieces:</strong></label>
-    <select id="gridSelect">
-      <option value="2">2x2 (4 pieces)</option>
-      <option value="3">3x3 (9 pieces)</option>
-      <option value="4" selected>4x4 (16 pieces)</option>
-      <option value="6">6x6 (36 pieces)</option>
-      <option value="10">10x10 (100 pieces)</option>
-    </select>
+    
+    <div id="gameStatus">Select pieces & upload an image!</div>
 
-    <input type="file" id="imageUpload" accept="image/*">
-    <button id="uploadBtn">Upload & Start</button>
-    <button id="resetBtn" class="sec-btn">Reset Puzzle</button>
-    <button id="hintBtn" class="action-btn">💡 Hint</button>
-    <button id="finishBtn" class="finish-btn">✅ Finish Puzzle</button>
-    <button id="historyBtn" class="action-btn">🏆 History</button>
-  </div>
-  
-  <div id="gameStatus">Select pieces & upload an image!</div>
-
-  <div id="gameContainer">
-    <div id="board"></div>
-    <div id="tray"></div>
+    <div id="gameContainer">
+      <div id="board"></div>
+      <div id="tray"></div>
+    </div>
   </div>
 
-  <script type="module" src="script.js?v=5"></script>
+  <!-- PAGE 3: Dedicated Full-Screen History Page -->
+  <div id="historyPage">
+    <div class="history-container">
+      <div class="history-header">
+        <h1>🏆 Solved Puzzle Achievements</h1>
+        <button id="backToGameBtn" class="finish-btn">⬅️ Back to Game</button>
+      </div>
+      <p class="history-subtitle">Puzzles completed together!</p>
+      <div id="historyStats">Loading achievements...</div>
+    </div>
+  </div>
+
+  <script type="module" src="script.js?v=6"></script>
 </body>
 </html>
