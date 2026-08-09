@@ -249,6 +249,7 @@ button:hover { background-color: #e91e63; }
   opacity: 0.9;
   transform: scale(1.05);
   box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+  pointer-events: none !important;
 }
 
 .player-tag {
@@ -263,7 +264,7 @@ button:hover { background-color: #e91e63; }
   padding: 2px 8px;
   border-radius: 10px;
   white-space: nowrap;
-  pointer-events: none;
+  pointer-events: none !important;
 }
 
 #celebrationOverlay {
