@@ -11,45 +11,50 @@ h1 {
 }
 #controls {
   margin-bottom: 20px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+select, button, input {
+  padding: 8px 12px;
+  border-radius: 5px;
+  border: 1px solid #f06292;
+  font-size: 0.95em;
 }
 button {
-  padding: 10px 15px;
   background-color: #f06292;
   color: white;
   border: none;
-  border-radius: 5px;
   cursor: pointer;
-  margin-left: 10px;
   font-weight: bold;
 }
 button:hover {
   background-color: #e91e63;
 }
 #gameStatus {
-  font-size: 1.3em;
-  margin-bottom: 20px;
+  font-size: 1.2em;
+  margin-bottom: 15px;
   font-weight: bold;
   color: #d81b60;
 }
 #gameContainer {
   display: flex;
   justify-content: center;
+  align-items: flex-start;
   gap: 30px;
-  margin-top: 20px;
+  flex-wrap: wrap;
 }
 #board {
   width: 600px;
   height: 600px;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  grid-template-rows: repeat(4, 1fr);
   border: 4px solid #f06292;
   background-color: #fff;
   box-shadow: 0 4px 15px rgba(233, 30, 99, 0.2);
 }
 .slot {
-  width: 150px;
-  height: 150px;
   border: 1px dashed #f48fb1;
   box-sizing: border-box;
   display: flex;
@@ -57,23 +62,24 @@ button:hover {
   justify-content: center;
 }
 #tray {
-  width: 340px;
+  width: 360px;
   height: 600px;
   border: 4px solid #f06292;
   background-color: #fff;
   display: flex;
   flex-wrap: wrap;
   align-content: flex-start;
-  gap: 5px;
+  gap: 4px;
   padding: 10px;
   overflow-y: auto;
   box-shadow: 0 4px 15px rgba(233, 30, 99, 0.2);
+  box-sizing: border-box;
 }
 .piece {
-  width: 150px;
-  height: 150px;
   cursor: grab;
-  outline: 1px solid rgba(255, 255, 255, 0.3);
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
 .piece:active {
   cursor: grabbing;
