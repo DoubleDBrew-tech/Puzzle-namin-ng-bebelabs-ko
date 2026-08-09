@@ -31,15 +31,17 @@ const enterGameBtn = document.getElementById('enterGameBtn');
 const displayName = document.getElementById('displayName');
 const leaveBtn = document.getElementById('leaveBtn');
 
+const gameScreen = document.getElementById('gameScreen');
+const historyPage = document.getElementById('historyPage');
+const backToGameBtn = document.getElementById('backToGameBtn');
+
 const hintModal = document.getElementById('hintModal');
 const hintImage = document.getElementById('hintImage');
 const hintBtn = document.getElementById('hintBtn');
 const closeHint = document.getElementById('closeHint');
 
-const historyModal = document.getElementById('historyModal');
 const historyStats = document.getElementById('historyStats');
 const historyBtn = document.getElementById('historyBtn');
-const closeHistory = document.getElementById('closeHistory');
 
 const finishBtn = document.getElementById('finishBtn');
 const uploadBtn = document.getElementById('uploadBtn');
@@ -50,7 +52,7 @@ const board = document.getElementById('board');
 const tray = document.getElementById('tray');
 const gameStatus = document.getElementById('gameStatus');
 
-// --- AUTH & PERSISTENCE ---
+// --- PAGE 1: AUTH & PERSISTENCE ---
 function initAuth() {
   if (playerName) {
     displayName.innerText = playerName;
@@ -90,7 +92,33 @@ function initAuth() {
 }
 initAuth();
 
-// --- MODALS ---
+// --- PAGE NAVIGATION (PAGE 2 vs PAGE 3) ---
+historyBtn.addEventListener('click', async () => {
+  gameScreen.style.display = 'none';
+  historyPage.style.display = 'block';
+  historyStats.innerHTML = "<p>Fetching achievements...</p>";
+  
+  const snap = await getDoc(historyDocRef);
+  if (snap.exists()) {
+    const data = snap.data();
+    historyStats.innerHTML = `
+      <div class="rank-card"><h3>🌱 2x2 Beginner Rank</h3> <p>Completed: <strong>${data['rank_2'] || 0}</strong></p></div>
+      <div class="rank-card"><h3>🐣 3x3 Novice Rank</h3> <p>Completed: <strong>${data['rank_3'] || 0}</strong></p></div>
+      <div class="rank-card"><h3>⭐ 4x4 Intermediate Rank</h3> <p>Completed: <strong>${data['rank_4'] || 0}</strong></p></div>
+      <div class="rank-card"><h3>🔥 6x6 Advanced Rank</h3> <p>Completed: <strong>${data['rank_6'] || 0}</strong></p></div>
+      <div class="rank-card"><h3>👑 10x10 Master Rank</h3> <p>Completed: <strong>${data['rank_10'] || 0}</strong></p></div>
+    `;
+  } else {
+    historyStats.innerHTML = "<p>No puzzles completed yet! Go solve one together.</p>";
+  }
+});
+
+backToGameBtn.addEventListener('click', () => {
+  historyPage.style.display = 'none';
+  gameScreen.style.display = 'block';
+});
+
+// Hint Modal
 hintBtn.addEventListener('click', () => {
   if (localState && localState.imageUrl) {
     hintImage.src = localState.imageUrl;
@@ -101,27 +129,7 @@ hintBtn.addEventListener('click', () => {
 });
 closeHint.addEventListener('click', () => hintModal.style.display = 'none');
 
-historyBtn.addEventListener('click', async () => {
-  historyModal.style.display = 'flex';
-  historyStats.innerHTML = "Fetching history...";
-  
-  const snap = await getDoc(historyDocRef);
-  if (snap.exists()) {
-    const data = snap.data();
-    historyStats.innerHTML = `
-      <div class="rank-card"><h3>🌱 2x2 Beginner:</h3> <p>Completed: <strong>${data['rank_2'] || 0}</strong></p></div>
-      <div class="rank-card"><h3>🐣 3x3 Novice:</h3> <p>Completed: <strong>${data['rank_3'] || 0}</strong></p></div>
-      <div class="rank-card"><h3>⭐ 4x4 Intermediate:</h3> <p>Completed: <strong>${data['rank_4'] || 0}</strong></p></div>
-      <div class="rank-card"><h3>🔥 6x6 Advanced:</h3> <p>Completed: <strong>${data['rank_6'] || 0}</strong></p></div>
-      <div class="rank-card"><h3>👑 10x10 Master:</h3> <p>Completed: <strong>${data['rank_10'] || 0}</strong></p></div>
-    `;
-  } else {
-    historyStats.innerHTML = "<p>No puzzles completed yet!</p>";
-  }
-});
-closeHistory.addEventListener('click', () => historyModal.style.display = 'none');
-
-// Image processor
+// Image processing helper
 function processImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -168,6 +176,28 @@ function setupBoard(gridSize) {
   tray.innerHTML = '';
 }
 setupBoard(currentGridSize);
+
+// --- GRID DROPDOWN MODE SWITCHER (REAL-TIME SYNC) ---
+gridSelect.addEventListener('change', async () => {
+  const newSize = parseInt(gridSelect.value);
+  const totalPieces = newSize * newSize;
+  const trayOrder = generateShuffledOrder(totalPieces);
+  
+  const initialPieces = {};
+  for (let i = 0; i < totalPieces; i++) {
+    initialPieces[i] = 'tray';
+  }
+
+  // Update Firestore so ALL connected users change mode & re-slice image simultaneously
+  await setDoc(docRef, {
+    gridSize: newSize,
+    pieces: initialPieces,
+    trayOrder: trayOrder,
+    placedBy: {},
+    completed: false,
+    winnerText: ""
+  }, { merge: true });
+});
 
 // --- DRAG ENGINE & REAL-TIME SYNC ---
 function makePieceDraggable(piece) {
@@ -230,7 +260,7 @@ function makePieceDraggable(piece) {
   });
 }
 
-// Render pieces using deterministic trayOrder from Firebase
+// Render pieces dynamically
 function renderPieces(state) {
   if (!state || !state.imageUrl) return;
   if (activePiece) return;
@@ -241,12 +271,14 @@ function renderPieces(state) {
 
   if (gridSelect.value != gridSize) gridSelect.value = gridSize;
 
+  // Re-setup board grid if size changed
   if (currentGridSize !== gridSize || board.children.length !== totalPieces) {
     currentGridSize = gridSize;
     setupBoard(gridSize);
+    document.querySelectorAll('.piece').forEach(p => p.remove());
   }
 
-  // Create pieces if DOM count mismatches
+  // Generate DOM pieces if missing
   if (document.querySelectorAll('.piece').length !== totalPieces) {
     tray.innerHTML = '';
     for (let i = 0; i < totalPieces; i++) {
@@ -260,7 +292,7 @@ function renderPieces(state) {
       
       const row = Math.floor(i / gridSize);
       const col = i % gridSize;
-      piece.style.backgroundImage = `url(${state.imageUrl})`;
+      piece.style.backgroundImage = `url("${state.imageUrl}")`;
       piece.style.backgroundSize = `${boardSize}px ${boardSize}px`;
       piece.style.backgroundPosition = `-${col * pieceSize}px -${row * pieceSize}px`;
       
@@ -269,13 +301,9 @@ function renderPieces(state) {
     }
   }
 
-  // Position pieces on board or inside tray following state.trayOrder
   const trayOrder = state.trayOrder || Array.from({ length: totalPieces }, (_, i) => i);
   
-  // Clear tray to re-render in correct order
-  tray.innerHTML = '';
-  
-  // 1. First append tray pieces in shuffled order
+  // Render tray pieces in shuffled order
   trayOrder.forEach((pieceIdx) => {
     const piece = document.getElementById(`piece-${pieceIdx}`);
     if (!piece) return;
@@ -285,7 +313,7 @@ function renderPieces(state) {
     }
   });
 
-  // 2. Append board pieces to their respective slots
+  // Render board pieces
   for (let i = 0; i < totalPieces; i++) {
     const piece = document.getElementById(`piece-${i}`);
     if (!piece) continue;
@@ -314,13 +342,11 @@ async function updatePieceLocation(pieceIndex, targetLocation) {
   localState.placedBy = localState.placedBy || {};
 
   if (targetLocation.startsWith('slot-')) {
-    // If a piece already exists in that slot, send it back to tray
     const existingPieceIndex = Object.keys(localState.pieces).find(key => localState.pieces[key] === targetLocation);
     if (existingPieceIndex !== undefined && existingPieceIndex !== pieceIndex) {
       localState.pieces[existingPieceIndex] = 'tray'; 
       delete localState.placedBy[existingPieceIndex];
     }
-    // Record who placed this piece
     localState.placedBy[pieceIndex] = playerName;
   } else {
     delete localState.placedBy[pieceIndex];
@@ -330,7 +356,6 @@ async function updatePieceLocation(pieceIndex, targetLocation) {
   await setDoc(docRef, { pieces: localState.pieces, placedBy: localState.placedBy }, { merge: true });
 }
 
-// Trigger celebratory particle explosion
 function triggerCelebration() {
   const overlay = document.getElementById('celebrationOverlay');
   overlay.innerHTML = '';
@@ -359,7 +384,7 @@ function triggerCelebration() {
   setTimeout(() => overlay.innerHTML = '', 2500);
 }
 
-// --- SUBMIT / FINISH PUZZLE LOGIC ---
+// --- FINISH PUZZLE LOGIC ---
 finishBtn.addEventListener('click', async () => {
   if (!localState || !localState.pieces) return;
   
@@ -374,7 +399,6 @@ finishBtn.addEventListener('click', async () => {
   }
 
   if (correctCount === totalPieces) {
-    // Tally correct placements per player
     const tally = {};
     const placedBy = localState.placedBy || {};
     
@@ -383,7 +407,6 @@ finishBtn.addEventListener('click', async () => {
       tally[author] = (tally[author] || 0) + 1;
     }
 
-    // Determine winner/MVP
     let topPlayer = "";
     let maxPlaced = -1;
     let isTie = false;
@@ -398,12 +421,9 @@ finishBtn.addEventListener('click', async () => {
       }
     });
 
-    let winnerMsg = "";
-    if (isTie) {
-      winnerMsg = `🎉 Complete! It's a tie! Both placed equal pieces. ❤️`;
-    } else {
-      winnerMsg = `🎉 Complete! ${topPlayer} placed the most pieces (${maxPlaced}/${totalPieces})! 👑`;
-    }
+    let winnerMsg = isTie 
+      ? `🎉 Complete! It's a tie! Both placed equal pieces. ❤️`
+      : `🎉 Complete! ${topPlayer} placed the most pieces (${maxPlaced}/${totalPieces})! 👑`;
 
     triggerCelebration();
 
@@ -420,9 +440,8 @@ finishBtn.addEventListener('click', async () => {
     }
 
   } else {
-    // Vibrate/Shake board on error
     board.classList.remove('shake-error');
-    void board.offsetWidth; // Force CSS reflow
+    void board.offsetWidth;
     board.classList.add('shake-error');
 
     gameStatus.innerText = `❌ Incorrect! (${correctCount}/${totalPieces} pieces are in the right spot)`;
