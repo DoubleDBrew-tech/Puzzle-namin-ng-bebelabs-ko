@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, doc, setDoc, getDoc, onSnapshot, updateDoc, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot, updateDoc, increment, deleteField } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAB3HwQfyL32dYL473BG5_bUlGXk30p_-A",
@@ -197,7 +197,6 @@ gridSelect.addEventListener('change', async () => {
   setupBoard(newSize);
   document.querySelectorAll('.piece').forEach(p => p.remove());
 
-  // Broadcast grid changes to all connected players immediately
   await setDoc(docRef, {
     gridSize: newSize,
     pieces: initialPieces,
@@ -215,7 +214,6 @@ function makePieceDraggable(piece) {
     const pieceIdx = piece.dataset.index;
     const pKey = `p_${pieceIdx}`;
 
-    // Prevent dragging if someone else is actively holding it
     if (localState?.activeDrags?.[pKey] && localState.activeDrags[pKey] !== playerName) {
       return;
     }
@@ -240,13 +238,10 @@ function makePieceDraggable(piece) {
     
     document.body.appendChild(piece);
 
-    // Sync active drag status to Firestore
     try {
-      await setDoc(docRef, {
-        activeDrags: {
-          [pKey]: playerName
-        }
-      }, { merge: true });
+      await updateDoc(docRef, {
+        [`activeDrags.${pKey}`]: playerName
+      });
     } catch (err) {
       console.error("Drag start sync error:", err);
     }
@@ -313,19 +308,16 @@ function renderPieces(state) {
   const gridSize = state.gridSize || 4;
   const totalPieces = gridSize * gridSize;
 
-  // Sync grid dropdown control
   if (gridSelect.value != gridSize) {
     gridSelect.value = gridSize;
   }
 
-  // Update board grid layout immediately
   if (currentGridSize !== gridSize || board.children.length !== totalPieces) {
     currentGridSize = gridSize;
     setupBoard(gridSize);
     document.querySelectorAll('.piece').forEach(p => p.remove());
   }
 
-  // If no image uploaded yet, show ready state
   if (!state.imageUrl) {
     tray.innerHTML = '';
     gameStatus.innerText = "Select pieces & upload an image!";
@@ -361,7 +353,6 @@ function renderPieces(state) {
 
     if (activePiece && activePiece.dataset.index == i) continue;
 
-    // Indicate live holding status for other connected players
     const holdingPlayer = activeDrags[pKey];
     let tag = piece.querySelector('.player-tag');
     if (holdingPlayer && holdingPlayer !== playerName) {
@@ -396,7 +387,6 @@ function renderPieces(state) {
     }
   }
 
-  // Remove stale piece elements from previous larger grid sizes
   document.querySelectorAll('.piece').forEach(p => {
     if (parseInt(p.dataset.index) >= totalPieces) {
       p.remove();
@@ -424,34 +414,29 @@ function renderPieces(state) {
 
 async function updatePieceLocation(pieceIndex, targetLocation) {
   if (!localState) return;
-  
-  localState.pieces = localState.pieces || {};
-  localState.placedBy = localState.placedBy || {};
-  localState.activeDrags = localState.activeDrags || {};
-  
+
   const pKey = `p_${pieceIndex}`;
+  const updates = {};
+
+  updates[`pieces.${pKey}`] = targetLocation;
+  updates[`activeDrags.${pKey}`] = deleteField();
 
   if (targetLocation.startsWith('slot-')) {
-    Object.keys(localState.pieces).forEach(k => {
-      if (localState.pieces[k] === targetLocation && k !== pKey) {
-        localState.pieces[k] = 'tray';
-        delete localState.placedBy[k];
-      }
-    });
-    localState.placedBy[pKey] = playerName;
+    if (localState.pieces) {
+      Object.keys(localState.pieces).forEach(k => {
+        if (localState.pieces[k] === targetLocation && k !== pKey) {
+          updates[`pieces.${k}`] = 'tray';
+          updates[`placedBy.${k}`] = deleteField();
+        }
+      });
+    }
+    updates[`placedBy.${pKey}`] = playerName;
   } else {
-    delete localState.placedBy[pKey];
+    updates[`placedBy.${pKey}`] = deleteField();
   }
 
-  localState.pieces[pKey] = targetLocation;
-  delete localState.activeDrags[pKey];
-  
   try {
-    await setDoc(docRef, { 
-      pieces: localState.pieces, 
-      placedBy: localState.placedBy,
-      activeDrags: localState.activeDrags
-    }, { merge: true });
+    await updateDoc(docRef, updates);
   } catch (err) {
     console.error("Firestore sync error:", err);
   }
@@ -529,10 +514,10 @@ finishBtn.addEventListener('click', async () => {
 
     triggerCelebration();
 
-    await setDoc(docRef, { 
+    await updateDoc(docRef, { 
       completed: true, 
       winnerText: winnerMsg 
-    }, { merge: true });
+    });
     
     const rankKey = `rank_${gridSize}`;
     try {
