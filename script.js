@@ -182,27 +182,42 @@ function setupBoard(gridSize) {
 }
 setupBoard(currentGridSize);
 
-// --- GLOBAL POINTER DRAG LISTENERS ---
-window.addEventListener('pointermove', (e) => {
-  if (!activePiece) return;
-  e.preventDefault();
-  activePiece.style.left = `${e.clientX - dragOffset.x}px`;
-  activePiece.style.top = `${e.clientY - dragOffset.y}px`;
-});
+// Helper function to extract coordinates from both mouse/pointer and touch events
+function getCoords(e) {
+  if (e.touches && e.touches.length > 0) {
+    return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }
+  if (e.changedTouches && e.changedTouches.length > 0) {
+    return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+  }
+  return { x: e.clientX, y: e.clientY };
+}
 
-window.addEventListener('pointerup', async (e) => {
+// --- GLOBAL DRAG MOVE AND RELEASE LISTENERS ---
+function handleMove(e) {
+  if (!activePiece) return;
+  if (e.cancelable) e.preventDefault(); // Stop iPad native scroll while dragging
+  
+  const coords = getCoords(e);
+  activePiece.style.left = `${coords.x - dragOffset.x}px`;
+  activePiece.style.top = `${coords.y - dragOffset.y}px`;
+}
+
+async function handleEnd(e) {
   if (!activePiece) return;
 
   const piece = activePiece;
   activePiece = null;
 
+  const coords = getCoords(e);
+
   piece.classList.remove('dragging');
   const tag = piece.querySelector('.player-tag');
   if (tag) tag.remove();
 
-  // Temporarily hide the piece so elementFromPoint identifies the drop target directly underneath
+  // Temporarily hide piece so elementFromPoint identifies underlying grid slot or tray
   piece.style.display = 'none';
-  const dropElem = document.elementFromPoint(e.clientX, e.clientY);
+  const dropElem = document.elementFromPoint(coords.x, coords.y);
   piece.style.display = 'block';
 
   piece.style.position = 'relative';
@@ -238,28 +253,34 @@ window.addEventListener('pointerup', async (e) => {
   }
 
   await updatePieceLocation(pieceIdx, targetLocation);
-});
+}
+
+window.addEventListener('pointermove', handleMove, { passive: false });
+window.addEventListener('touchmove', handleMove, { passive: false });
+
+window.addEventListener('pointerup', handleEnd);
+window.addEventListener('touchend', handleEnd);
 
 // --- DRAG ENGINE & REAL-TIME SYNC ---
 function makePieceDraggable(piece) {
-  piece.addEventListener('pointerdown', async (e) => {
+  const startDrag = async (e) => {
     const pieceIdx = piece.dataset.index;
     const pKey = `p_${pieceIdx}`;
 
-    // Prevent dragging if another player is holding it
     if (localState?.activeDrags?.[pKey] && localState.activeDrags[pKey] !== playerName) {
       return;
     }
 
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
     activePiece = piece;
-    
+
+    const coords = getCoords(e);
     const rect = piece.getBoundingClientRect();
-    dragOffset.x = e.clientX - rect.left;
-    dragOffset.y = e.clientY - rect.top;
+    dragOffset.x = coords.x - rect.left;
+    dragOffset.y = coords.y - rect.top;
 
     piece.classList.add('dragging');
-    
+
     let tag = piece.querySelector('.player-tag');
     if (!tag) {
       tag = document.createElement('div');
@@ -269,9 +290,9 @@ function makePieceDraggable(piece) {
     tag.innerText = `Holding: ${playerName || "Player"}`;
 
     piece.style.position = 'fixed';
-    piece.style.left = `${e.clientX - dragOffset.x}px`;
-    piece.style.top = `${e.clientY - dragOffset.y}px`;
-    
+    piece.style.left = `${coords.x - dragOffset.x}px`;
+    piece.style.top = `${coords.y - dragOffset.y}px`;
+
     document.body.appendChild(piece);
 
     try {
@@ -281,7 +302,10 @@ function makePieceDraggable(piece) {
     } catch (err) {
       console.error("Drag start sync error:", err);
     }
-  });
+  };
+
+  piece.addEventListener('pointerdown', startDrag);
+  piece.addEventListener('touchstart', startDrag, { passive: false });
 }
 
 function renderPieces(state) {
@@ -333,7 +357,6 @@ function renderPieces(state) {
     piece.style.backgroundSize = `${boardSize}px ${boardSize}px`;
     piece.style.backgroundPosition = `-${col * pieceSize}px -${row * pieceSize}px`;
 
-    // Skip rendering updates for the piece currently being dragged locally
     if (activePiece && activePiece.dataset.index == i) continue;
 
     const holdingPlayer = activeDrags[pKey];
