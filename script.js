@@ -52,7 +52,7 @@ const board = document.getElementById('board');
 const tray = document.getElementById('tray');
 const gameStatus = document.getElementById('gameStatus');
 
-// --- PAGE 1: AUTH & PERSISTENCE ---
+// --- AUTH & USER SESSION PERSISTENCE ---
 function initAuth() {
   if (playerName) {
     displayName.innerText = playerName;
@@ -92,7 +92,7 @@ function initAuth() {
 }
 initAuth();
 
-// --- PAGE NAVIGATION (PAGE 2 vs PAGE 3) ---
+// --- PAGE NAVIGATION ---
 historyBtn.addEventListener('click', async () => {
   gameScreen.style.display = 'none';
   historyPage.style.display = 'block';
@@ -109,7 +109,7 @@ historyBtn.addEventListener('click', async () => {
       <div class="rank-card"><h3>👑 10x10 Master Rank</h3> <p>Completed: <strong>${data['rank_10'] || 0}</strong></p></div>
     `;
   } else {
-    historyStats.innerHTML = "<p>No puzzles completed yet! Go solve one together.</p>";
+    historyStats.innerHTML = "<p>No puzzles completed yet!</p>";
   }
 });
 
@@ -118,7 +118,6 @@ backToGameBtn.addEventListener('click', () => {
   gameScreen.style.display = 'block';
 });
 
-// Hint Modal
 hintBtn.addEventListener('click', () => {
   if (localState && localState.imageUrl) {
     hintImage.src = localState.imageUrl;
@@ -151,7 +150,6 @@ function processImage(file) {
   });
 }
 
-// Fisher-Yates shuffle generator
 function generateShuffledOrder(total) {
   const arr = Array.from({ length: total }, (_, i) => i);
   for (let i = arr.length - 1; i > 0; i--) {
@@ -177,7 +175,7 @@ function setupBoard(gridSize) {
 }
 setupBoard(currentGridSize);
 
-// --- GRID DROPDOWN MODE SWITCHER (REAL-TIME SYNC) ---
+// --- INSTANT MULTIPLAYER GRID MODE SYNC ---
 gridSelect.addEventListener('change', async () => {
   const newSize = parseInt(gridSelect.value);
   const totalPieces = newSize * newSize;
@@ -188,7 +186,11 @@ gridSelect.addEventListener('change', async () => {
     initialPieces[i] = 'tray';
   }
 
-  // Update Firestore so ALL connected users change mode & re-slice image simultaneously
+  // Update board locally right away
+  currentGridSize = newSize;
+  setupBoard(newSize);
+
+  // Sync to Firebase so ALL players update instantly
   await setDoc(docRef, {
     gridSize: newSize,
     pieces: initialPieces,
@@ -260,7 +262,7 @@ function makePieceDraggable(piece) {
   });
 }
 
-// Render pieces dynamically
+// Render pieces and sync across all clients
 function renderPieces(state) {
   if (!state || !state.imageUrl) return;
   if (activePiece) return;
@@ -269,16 +271,20 @@ function renderPieces(state) {
   const totalPieces = gridSize * gridSize;
   const pieceSize = boardSize / gridSize;
 
-  if (gridSelect.value != gridSize) gridSelect.value = gridSize;
+  if (gridSelect.value != gridSize) {
+    gridSelect.value = gridSize;
+  }
 
-  // Re-setup board grid if size changed
-  if (currentGridSize !== gridSize || board.children.length !== totalPieces) {
+  // Force re-build board and clear pieces if grid size changed
+  const currentPiecesOnBoard = document.querySelectorAll('.piece').length;
+  if (currentGridSize !== gridSize || currentPiecesOnBoard !== totalPieces) {
     currentGridSize = gridSize;
     setupBoard(gridSize);
+    // Remove stale pieces completely
     document.querySelectorAll('.piece').forEach(p => p.remove());
   }
 
-  // Generate DOM pieces if missing
+  // Generate DOM pieces
   if (document.querySelectorAll('.piece').length !== totalPieces) {
     tray.innerHTML = '';
     for (let i = 0; i < totalPieces; i++) {
@@ -303,7 +309,10 @@ function renderPieces(state) {
 
   const trayOrder = state.trayOrder || Array.from({ length: totalPieces }, (_, i) => i);
   
-  // Render tray pieces in shuffled order
+  // Clear tray to re-render in correct order
+  tray.innerHTML = '';
+
+  // Render tray pieces
   trayOrder.forEach((pieceIdx) => {
     const piece = document.getElementById(`piece-${pieceIdx}`);
     if (!piece) return;
