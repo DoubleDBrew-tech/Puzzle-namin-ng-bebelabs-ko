@@ -24,7 +24,9 @@ let playerName = localStorage.getItem('bebelabs_user') || "";
 let activePiece = null;
 let activeTouchId = null;
 let dragOffset = { x: 0, y: 0 };
-let pendingDropKey = null; // Locks piece position while network sync completes
+
+// Track recently dropped pieces locally until Firestore confirms their new locations
+const pendingDrops = new Set();
 
 // DOM Elements
 const welcomeScreen = document.getElementById('welcomeScreen');
@@ -243,7 +245,6 @@ async function onDragEnd(e) {
   }
 
   const isOverTray = dropElem ? dropElem.closest('#tray') : null;
-
   let targetLocation = 'tray';
 
   if (slot) {
@@ -257,6 +258,7 @@ async function onDragEnd(e) {
   if (!localState) localState = {};
   if (!localState.pieces) localState.pieces = {};
 
+  // If target slot is already occupied by another piece, bounce that piece to tray
   if (targetLocation.startsWith('slot-')) {
     Object.keys(localState.pieces).forEach(k => {
       if (localState.pieces[k] === targetLocation && k !== pKey) {
@@ -264,35 +266,33 @@ async function onDragEnd(e) {
       }
     });
   }
+
+  // Instantly apply change in local state so state feels immediate
   localState.pieces[pKey] = targetLocation;
+  pendingDrops.add(pKey);
 
-  // Lock this piece from being overwritten by background network snapshots
-  pendingDropKey = pKey;
-
-  // Clear references before rendering to ensure DOM resets properly
   activePiece = null;
   activeTouchId = null;
 
   renderPieces(localState);
   await updatePieceLocation(pieceIdx, targetLocation);
 
+  // Keep lock alive long enough for cloud Firestore sync to catch up
   setTimeout(() => {
-    if (pendingDropKey === pKey) pendingDropKey = null;
-  }, 1000);
+    pendingDrops.delete(pKey);
+  }, 1200);
 }
 
-// Global Touch & Pointer Listeners
 window.addEventListener('touchmove', onDragMove, { passive: false });
 window.addEventListener('touchend', onDragEnd);
 window.addEventListener('touchcancel', onDragEnd);
 
 window.addEventListener('mousemove', onDragMove);
 window.addEventListener('mouseup', onDragEnd);
-window.addEventListener('mouseleave', onDragEnd); // Catch drags escaping the window
+window.addEventListener('mouseleave', onDragEnd);
 
 function makePieceDraggable(piece) {
   const handleStart = async (e) => {
-    // Hard reset in case a previous drag got interrupted/stuck
     if (activePiece) {
       activePiece.classList.remove('dragging');
       activePiece.style.pointerEvents = 'auto';
@@ -338,11 +338,14 @@ function makePieceDraggable(piece) {
     document.body.appendChild(piece);
 
     try {
-      await setDoc(docRef, {
+      await updateDoc(docRef, {
         [`activeDrags.${pKey}`]: playerName || "Player"
-      }, { merge: true });
+      });
     } catch (err) {
-      console.error("Drag start sync error:", err);
+      // Fallback if document structure doesn't exist yet
+      await setDoc(docRef, {
+        activeDrags: { [`${pKey}`]: playerName || "Player" }
+      }, { merge: true });
     }
   };
 
@@ -419,7 +422,7 @@ function renderPieces(state) {
         tag.remove();
       }
       piece.style.opacity = '1';
-      piece.style.pointerEvents = 'auto'; // Re-enables interaction
+      piece.style.pointerEvents = 'auto';
     }
 
     const loc = piecesData[pKey] || 'tray';
@@ -496,10 +499,11 @@ async function updatePieceLocation(pieceIndex, targetLocation) {
   }
 
   try {
-    await setDoc(docRef, updates, { merge: true });
+    await updateDoc(docRef, updates);
   } catch (err) {
-    console.error("Firestore sync error:", err);
-    gameStatus.innerText = "⚠️ Network error saving move.";
+    console.error("Firestore update error:", err);
+    // If updating fail due to missing fields, fall back to merging setDoc
+    await setDoc(docRef, updates, { merge: true });
   }
 }
 
@@ -693,10 +697,14 @@ onSnapshot(docRef, (docSnap) => {
   if (docSnap.exists()) {
     const serverData = docSnap.data();
     
-    // Preserve local drop position while database write completes to avoid pieces bouncing back
-    if (pendingDropKey && localState && localState.pieces && localState.pieces[pendingDropKey]) {
+    // Maintain positions for pieces currently waiting on cloud confirmation
+    if (pendingDrops.size > 0 && localState && localState.pieces) {
       if (!serverData.pieces) serverData.pieces = {};
-      serverData.pieces[pendingDropKey] = localState.pieces[pendingDropKey];
+      pendingDrops.forEach((pKey) => {
+        if (localState.pieces[pKey]) {
+          serverData.pieces[pKey] = localState.pieces[pKey];
+        }
+      });
     }
 
     localState = serverData;
