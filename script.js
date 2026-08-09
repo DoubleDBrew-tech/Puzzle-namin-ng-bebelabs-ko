@@ -24,7 +24,7 @@ let playerName = localStorage.getItem('bebelabs_user') || "";
 let activePiece = null;
 let activeTouchId = null;
 let dragOffset = { x: 0, y: 0 };
-let pendingDropKey = null; // Prevents real-time listener overwrites during active drops
+let pendingDropKey = null; // Locks piece position while network sync completes
 
 // DOM Elements
 const welcomeScreen = document.getElementById('welcomeScreen');
@@ -226,23 +226,25 @@ async function onDragEnd(e) {
   const pieceIdx = piece.dataset.index;
   const pKey = `p_${pieceIdx}`;
 
-  // Lock this piece from being immediately overwritten by background snapshots
-  pendingDropKey = pKey;
+  // Clear active drag reference
+  activePiece = null;
+  activeTouchId = null;
 
-  // Temporarily disable pointer events so elementFromPoint looks through the dragged piece
   piece.style.pointerEvents = 'none';
 
   let releaseX, releaseY;
   if (e.changedTouches && e.changedTouches.length > 0) {
     releaseX = e.changedTouches[0].clientX;
     releaseY = e.changedTouches[0].clientY;
+  } else if (e.clientX !== undefined) {
+    releaseX = e.clientX;
+    releaseY = e.clientY;
   } else {
     const rect = piece.getBoundingClientRect();
     releaseX = rect.left + rect.width / 2;
     releaseY = rect.top + rect.height / 2;
   }
 
-  // Detect element underneath release coordinates
   let dropElem = document.elementFromPoint(releaseX, releaseY);
   let slot = dropElem ? dropElem.closest('.slot') : null;
 
@@ -261,7 +263,6 @@ async function onDragEnd(e) {
     targetLocation = localState?.pieces?.[pKey] || 'tray';
   }
 
-  // Update local state instantly before remote snapshot arrives
   if (!localState) localState = {};
   if (!localState.pieces) localState.pieces = {};
 
@@ -274,19 +275,21 @@ async function onDragEnd(e) {
   }
   localState.pieces[pKey] = targetLocation;
 
-  activePiece = null;
-  activeTouchId = null;
+  // Set pending lock key
+  pendingDropKey = pKey;
 
+  // Immediate local re-render to dock piece into the grid
   renderPieces(localState);
+
+  // Sync to Firestore
   await updatePieceLocation(pieceIdx, targetLocation);
 
-  // Release lock after network sync completes
   setTimeout(() => {
     if (pendingDropKey === pKey) pendingDropKey = null;
-  }, 300);
+  }, 1000);
 }
 
-// Global Touch & Pointer Listeners
+// Global Event Listeners
 window.addEventListener('touchmove', onDragMove, { passive: false });
 window.addEventListener('touchend', onDragEnd);
 window.addEventListener('touchcancel', onDragEnd);
@@ -379,8 +382,8 @@ function renderPieces(state) {
   for (let i = 0; i < totalPieces; i++) {
     const pKey = `p_${i}`;
 
-    // Prevent rendering collision if actively dragging or in middle of drop sync
-    if ((activePiece && parseInt(activePiece.dataset.index) === i) || pendingDropKey === pKey) {
+    // ONLY skip rendering if the user is actively holding/dragging the piece right now
+    if (activePiece && parseInt(activePiece.dataset.index) === i) {
       continue;
     }
 
@@ -692,7 +695,15 @@ resetBtn.addEventListener('click', async () => {
 // Real-time Firestore Listener
 onSnapshot(docRef, (docSnap) => {
   if (docSnap.exists()) {
-    localState = docSnap.data();
+    const serverData = docSnap.data();
+    
+    // Preserve local drop position while database write completes
+    if (pendingDropKey && localState && localState.pieces && localState.pieces[pendingDropKey]) {
+      if (!serverData.pieces) serverData.pieces = {};
+      serverData.pieces[pendingDropKey] = localState.pieces[pendingDropKey];
+    }
+
+    localState = serverData;
     renderPieces(localState);
   } else {
     setDoc(docRef, {
