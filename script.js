@@ -136,7 +136,7 @@ hintBtn.addEventListener('click', () => {
 });
 closeHint.addEventListener('click', () => hintModal.style.display = 'none');
 
-// Compressed Image processing helper (ensures fast payload transfer & reliable Firestore saving)
+// Image processing helper
 function processImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -182,30 +182,62 @@ function setupBoard(gridSize) {
 }
 setupBoard(currentGridSize);
 
-// --- INSTANT MULTIPLAYER GRID MODE SYNC ---
-gridSelect.addEventListener('change', async () => {
-  const newSize = parseInt(gridSelect.value);
-  const totalPieces = newSize * newSize;
-  const trayOrder = generateShuffledOrder(totalPieces);
-  
-  const initialPieces = {};
-  for (let i = 0; i < totalPieces; i++) {
-    initialPieces[`p_${i}`] = 'tray';
+// --- GLOBAL POINTER DRAG LISTENERS ---
+window.addEventListener('pointermove', (e) => {
+  if (!activePiece) return;
+  e.preventDefault();
+  activePiece.style.left = `${e.clientX - dragOffset.x}px`;
+  activePiece.style.top = `${e.clientY - dragOffset.y}px`;
+});
+
+window.addEventListener('pointerup', async (e) => {
+  if (!activePiece) return;
+
+  const piece = activePiece;
+  activePiece = null;
+
+  piece.classList.remove('dragging');
+  const tag = piece.querySelector('.player-tag');
+  if (tag) tag.remove();
+
+  // Temporarily hide the piece so elementFromPoint identifies the drop target directly underneath
+  piece.style.display = 'none';
+  const dropElem = document.elementFromPoint(e.clientX, e.clientY);
+  piece.style.display = 'block';
+
+  piece.style.position = 'relative';
+  piece.style.left = '0px';
+  piece.style.top = '0px';
+
+  const slot = dropElem ? dropElem.closest('.slot') : null;
+  const isOverTray = dropElem ? dropElem.closest('#tray') : null;
+
+  const pieceIdx = piece.dataset.index;
+  let targetLocation = 'tray';
+
+  if (slot) {
+    targetLocation = `slot-${slot.dataset.index}`;
+    const existingPiece = slot.querySelector('.piece');
+    if (existingPiece && existingPiece !== piece) {
+      tray.appendChild(existingPiece);
+    }
+    slot.appendChild(piece);
+  } else if (isOverTray) {
+    targetLocation = 'tray';
+    tray.appendChild(piece);
+  } else {
+    targetLocation = (localState?.pieces?.[`p_${pieceIdx}`]) || 'tray';
+    if (targetLocation.startsWith('slot-')) {
+      const sIdx = targetLocation.split('-')[1];
+      const targetSlot = document.querySelector(`.slot[data-index="${sIdx}"]`);
+      if (targetSlot) targetSlot.appendChild(piece);
+      else tray.appendChild(piece);
+    } else {
+      tray.appendChild(piece);
+    }
   }
 
-  currentGridSize = newSize;
-  setupBoard(newSize);
-  document.querySelectorAll('.piece').forEach(p => p.remove());
-
-  await setDoc(docRef, {
-    gridSize: newSize,
-    pieces: initialPieces,
-    trayOrder: trayOrder,
-    placedBy: {},
-    activeDrags: {},
-    completed: false,
-    winnerText: ""
-  }, { merge: true });
+  await updatePieceLocation(pieceIdx, targetLocation);
 });
 
 // --- DRAG ENGINE & REAL-TIME SYNC ---
@@ -214,23 +246,27 @@ function makePieceDraggable(piece) {
     const pieceIdx = piece.dataset.index;
     const pKey = `p_${pieceIdx}`;
 
+    // Prevent dragging if another player is holding it
     if (localState?.activeDrags?.[pKey] && localState.activeDrags[pKey] !== playerName) {
       return;
     }
 
     e.preventDefault();
     activePiece = piece;
-    piece.setPointerCapture(e.pointerId);
     
     const rect = piece.getBoundingClientRect();
     dragOffset.x = e.clientX - rect.left;
     dragOffset.y = e.clientY - rect.top;
 
     piece.classList.add('dragging');
-    let tag = piece.querySelector('.player-tag') || document.createElement('div');
-    tag.className = 'player-tag';
+    
+    let tag = piece.querySelector('.player-tag');
+    if (!tag) {
+      tag = document.createElement('div');
+      tag.className = 'player-tag';
+      piece.appendChild(tag);
+    }
     tag.innerText = `Holding: ${playerName || "Player"}`;
-    piece.appendChild(tag);
 
     piece.style.position = 'fixed';
     piece.style.left = `${e.clientX - dragOffset.x}px`;
@@ -245,67 +281,6 @@ function makePieceDraggable(piece) {
     } catch (err) {
       console.error("Drag start sync error:", err);
     }
-  });
-
-  piece.addEventListener('pointermove', (e) => {
-    if (!activePiece || activePiece !== piece) return;
-    piece.style.left = `${e.clientX - dragOffset.x}px`;
-    piece.style.top = `${e.clientY - dragOffset.y}px`;
-  });
-
-  piece.addEventListener('pointerup', async (e) => {
-    if (!activePiece || activePiece !== piece) return;
-    
-    piece.releasePointerCapture(e.pointerId);
-    piece.classList.remove('dragging');
-    const tag = piece.querySelector('.player-tag');
-    if (tag) tag.remove();
-
-    // Temporarily hide the piece and disable its pointer events so elementFromPoint lands on the slot below
-    const origDisplay = piece.style.display;
-    const origPointerEvents = piece.style.pointerEvents;
-    piece.style.display = 'none';
-    piece.style.pointerEvents = 'none';
-
-    const dropElem = document.elementFromPoint(e.clientX, e.clientY);
-
-    // Restore styling
-    piece.style.display = origDisplay;
-    piece.style.pointerEvents = origPointerEvents;
-    piece.style.position = 'relative';
-    piece.style.left = '0px';
-    piece.style.top = '0px';
-
-    const slot = dropElem ? dropElem.closest('.slot') : null;
-    const isOverTray = dropElem ? dropElem.closest('#tray') : null;
-
-    const pieceIdx = piece.dataset.index;
-    let targetLocation = 'tray';
-
-    if (slot) {
-      targetLocation = `slot-${slot.dataset.index}`;
-      const existingPiece = slot.querySelector('.piece');
-      if (existingPiece && existingPiece !== piece) {
-        tray.appendChild(existingPiece);
-      }
-      slot.appendChild(piece);
-    } else if (isOverTray) {
-      targetLocation = 'tray';
-      tray.appendChild(piece);
-    } else {
-      targetLocation = (localState?.pieces?.[`p_${pieceIdx}`]) || 'tray';
-      if (targetLocation.startsWith('slot-')) {
-        const sIdx = targetLocation.split('-')[1];
-        const targetSlot = document.querySelector(`.slot[data-index="${sIdx}"]`);
-        if (targetSlot) targetSlot.appendChild(piece);
-        else tray.appendChild(piece);
-      } else {
-        tray.appendChild(piece);
-      }
-    }
-
-    activePiece = null;
-    await updatePieceLocation(pieceIdx, targetLocation);
   });
 }
 
@@ -358,6 +333,7 @@ function renderPieces(state) {
     piece.style.backgroundSize = `${boardSize}px ${boardSize}px`;
     piece.style.backgroundPosition = `-${col * pieceSize}px -${row * pieceSize}px`;
 
+    // Skip rendering updates for the piece currently being dragged locally
     if (activePiece && activePiece.dataset.index == i) continue;
 
     const holdingPlayer = activeDrags[pKey];
@@ -477,7 +453,32 @@ function triggerCelebration() {
   setTimeout(() => overlay.innerHTML = '', 2500);
 }
 
-// --- FINISH PUZZLE LOGIC ---
+// --- GRID & BUTTON LISTENERS ---
+gridSelect.addEventListener('change', async () => {
+  const newSize = parseInt(gridSelect.value);
+  const totalPieces = newSize * newSize;
+  const trayOrder = generateShuffledOrder(totalPieces);
+  
+  const initialPieces = {};
+  for (let i = 0; i < totalPieces; i++) {
+    initialPieces[`p_${i}`] = 'tray';
+  }
+
+  currentGridSize = newSize;
+  setupBoard(newSize);
+  document.querySelectorAll('.piece').forEach(p => p.remove());
+
+  await setDoc(docRef, {
+    gridSize: newSize,
+    pieces: initialPieces,
+    trayOrder: trayOrder,
+    placedBy: {},
+    activeDrags: {},
+    completed: false,
+    winnerText: ""
+  }, { merge: true });
+});
+
 finishBtn.addEventListener('click', async () => {
   if (!localState || !localState.pieces) return;
   
@@ -544,7 +545,6 @@ finishBtn.addEventListener('click', async () => {
   }
 });
 
-// --- SHUFFLE & UPLOAD ---
 uploadBtn.addEventListener('click', async () => {
   const file = imageUpload.files[0];
   if (!file) {
@@ -609,7 +609,7 @@ resetBtn.addEventListener('click', async () => {
   }
 });
 
-// Real-time Firestore listener with automatic fallback initialization
+// Firestore listener
 onSnapshot(docRef, (docSnap) => {
   if (docSnap.exists()) {
     localState = docSnap.data();
