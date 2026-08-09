@@ -28,7 +28,13 @@ const board = document.getElementById('board');
 const tray = document.getElementById('tray');
 const gameStatus = document.getElementById('gameStatus');
 
-// Convert and resize uploaded image locally using HTML5 Canvas
+// Update board UI instantly when dropdown value changes
+gridSelect.addEventListener('change', () => {
+  const newSize = parseInt(gridSelect.value);
+  setupBoard(newSize);
+});
+
+// Downscale & compress image to lightweight JPEG string for fast Firestore sync
 function processImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -36,17 +42,17 @@ function processImage(file) {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        canvas.width = boardSize;
-        canvas.height = boardSize;
+        canvas.width = 500;
+        canvas.height = 500;
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, boardSize, boardSize);
-        // Returns compressed image string directly
-        resolve(canvas.toDataURL('image/jpeg', 0.85));
+        ctx.drawImage(img, 0, 0, 500, 500);
+        // Compressed JPEG keeps size small (~40KB)
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
       };
-      img.onerror = reject;
+      img.onerror = () => reject("Failed to process image.");
       img.src = e.target.result;
     };
-    reader.onerror = reject;
+    reader.onerror = () => reject("Failed to read file.");
     reader.readAsDataURL(file);
   });
 }
@@ -68,9 +74,13 @@ function setupBoard(gridSize) {
     board.appendChild(slot);
   }
   
+  tray.innerHTML = '';
   tray.addEventListener('dragover', (e) => e.preventDefault());
   tray.addEventListener('drop', (e) => handleDrop(e, 'tray'));
 }
+
+// Initial default grid setup
+setupBoard(currentGridSize);
 
 // Render puzzle pieces
 function renderPieces(state) {
@@ -81,13 +91,17 @@ function renderPieces(state) {
   const totalPieces = gridSize * gridSize;
   const pieceSize = boardSize / gridSize;
 
+  // Sync dropdown UI to match state grid size
+  if (gridSelect.value != gridSize) {
+    gridSelect.value = gridSize;
+  }
+
   if (currentGridSize !== gridSize || board.children.length !== totalPieces) {
     currentGridSize = gridSize;
     setupBoard(gridSize);
-    tray.innerHTML = '';
   }
 
-  // Create pieces DOM elements if missing
+  // Generate pieces DOM elements if missing
   if (document.querySelectorAll('.piece').length !== totalPieces) {
     tray.innerHTML = '';
     for (let i = 0; i < totalPieces; i++) {
@@ -118,7 +132,7 @@ function renderPieces(state) {
     }
   }
 
-  // Sync positions from Firestore
+  // Position pieces based on Firestore location
   let correctCount = 0;
   for (let i = 0; i < totalPieces; i++) {
     const piece = document.getElementById(`piece-${i}`);
@@ -145,7 +159,7 @@ function checkWinCondition(correctCount, total) {
     gameStatus.innerText = "🎉 Puzzle Complete! Perfect job! 🎉";
     gameStatus.style.color = "#4caf50";
   } else {
-    gameStatus.innerText = `Solving puzzle (${correctCount}/${total} correct)`;
+    gameStatus.innerText = `Solving puzzle (${correctCount}/${total} pieces placed correctly)`;
     gameStatus.style.color = "#d81b60";
   }
 }
@@ -155,7 +169,6 @@ async function handleDrop(e, targetLocation) {
   const pieceIndex = e.dataTransfer.getData('text/plain');
   if (pieceIndex === "" || !localState || !localState.pieces) return;
   
-  // Kick piece out if slot is already occupied
   if (targetLocation.startsWith('slot-')) {
     const existingPieceIndex = Object.keys(localState.pieces).find(key => localState.pieces[key] === targetLocation);
     if (existingPieceIndex !== undefined && existingPieceIndex !== pieceIndex) {
@@ -171,14 +184,15 @@ async function handleDrop(e, targetLocation) {
 uploadBtn.addEventListener('click', async () => {
   const file = imageUpload.files[0];
   if (!file) {
-    alert("Please select a picture first!");
+    alert("Please choose a picture first!");
     return;
   }
   
   const gridSize = parseInt(gridSelect.value);
   const totalPieces = gridSize * gridSize;
 
-  gameStatus.innerText = "Processing image...";
+  gameStatus.innerText = "Creating puzzle pieces...";
+  gameStatus.style.color = "#d81b60";
   
   try {
     const dataUrl = await processImage(file);
@@ -198,7 +212,8 @@ uploadBtn.addEventListener('click', async () => {
     gameStatus.innerText = "Puzzle ready! Move the pieces.";
   } catch (err) {
     console.error(err);
-    alert("Error loading picture. Please try another image.");
+    gameStatus.innerText = "Error loading picture. Try again!";
+    alert("Could not process picture. Please try another photo.");
   }
 });
 
