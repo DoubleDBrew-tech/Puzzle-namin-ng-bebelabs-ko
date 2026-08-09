@@ -208,7 +208,6 @@ function onDragMove(e) {
   activePiece.style.top = `${coords.y - dragOffset.y}px`;
 }
 
-// Fallback slot detector in case elementFromPoint misfires on iOS touch
 function findSlotFromCoords(x, y) {
   const slots = document.querySelectorAll('.slot');
   for (const slot of slots) {
@@ -220,37 +219,42 @@ function findSlotFromCoords(x, y) {
   return null;
 }
 
+// Reset inline position styles when dropped so piece fits slot 100%
+function resetPieceStyles(piece) {
+  piece.classList.remove('dragging');
+  piece.style.position = 'relative';
+  piece.style.left = '';
+  piece.style.top = '';
+  piece.style.width = '100%';
+  piece.style.height = '100%';
+  piece.style.pointerEvents = 'auto';
+
+  const tag = piece.querySelector('.player-tag');
+  if (tag) tag.remove();
+}
+
 async function onDragEnd(e) {
   if (!activePiece) return;
 
   const piece = activePiece;
   const pieceIdx = piece.dataset.index;
-
   const coords = extractCoords(e);
 
   activePiece = null;
   activeTouchId = null;
 
-  piece.classList.remove('dragging');
-  piece.style.pointerEvents = 'auto'; // Re-enable touch interactions
-
-  const tag = piece.querySelector('.player-tag');
-  if (tag) tag.remove();
-
-  // Primary slot check via elementFromPoint
+  // Find slot before resetting element styles
   let dropElem = document.elementFromPoint(coords.x, coords.y);
   let slot = dropElem ? dropElem.closest('.slot') : null;
 
-  // Secondary slot check via bounding box
   if (!slot) {
     slot = findSlotFromCoords(coords.x, coords.y);
   }
 
   const isOverTray = dropElem ? dropElem.closest('#tray') : null;
 
-  piece.style.position = 'relative';
-  piece.style.left = '0px';
-  piece.style.top = '0px';
+  // Clear dragging fixed positioning
+  resetPieceStyles(piece);
 
   let targetLocation = 'tray';
 
@@ -259,6 +263,7 @@ async function onDragEnd(e) {
     const existingPiece = slot.querySelector('.piece');
     if (existingPiece && existingPiece !== piece) {
       tray.appendChild(existingPiece);
+      resetPieceStyles(existingPiece);
     }
     slot.appendChild(piece);
   } else if (isOverTray) {
@@ -269,8 +274,11 @@ async function onDragEnd(e) {
     if (targetLocation.startsWith('slot-')) {
       const sIdx = targetLocation.split('-')[1];
       const targetSlot = document.querySelector(`.slot[data-index="${sIdx}"]`);
-      if (targetSlot) targetSlot.appendChild(piece);
-      else tray.appendChild(piece);
+      if (targetSlot) {
+        targetSlot.appendChild(piece);
+      } else {
+        tray.appendChild(piece);
+      }
     } else {
       tray.appendChild(piece);
     }
@@ -308,8 +316,13 @@ function makePieceDraggable(piece) {
     dragOffset.x = coords.x - rect.left;
     dragOffset.y = coords.y - rect.top;
 
+    // Set dragging dimensions to match actual calculated piece size
+    const pSize = boardSize / (currentGridSize || 4);
+    piece.style.width = `${pSize}px`;
+    piece.style.height = `${pSize}px`;
+
     piece.classList.add('dragging');
-    piece.style.pointerEvents = 'none'; // CRITICAL: Allows elementFromPoint to hit grid slots behind active piece
+    piece.style.pointerEvents = 'none';
 
     let tag = piece.querySelector('.player-tag');
     if (!tag) {
@@ -381,10 +394,7 @@ function renderPieces(state) {
       makePieceDraggable(piece);
       tray.appendChild(piece);
     }
-    
-    piece.style.width = `${pieceSize}px`;
-    piece.style.height = `${pieceSize}px`;
-    
+
     const row = Math.floor(i / gridSize);
     const col = i % gridSize;
     piece.style.backgroundImage = `url("${state.imageUrl}")`;
@@ -417,10 +427,12 @@ function renderPieces(state) {
       const slot = document.querySelector(`.slot[data-index="${slotIndex}"]`);
       if (slot && piece.parentElement !== slot) {
         slot.appendChild(piece);
+        resetPieceStyles(piece);
       }
     } else {
       if (piece.parentElement !== tray) {
         tray.appendChild(piece);
+        resetPieceStyles(piece);
       }
     }
   }
