@@ -225,30 +225,30 @@ async function onDragEnd(e) {
   const pieceIdx = piece.dataset.index;
   const pKey = `p_${pieceIdx}`;
 
-  // Find center point of dragged piece
-  const rect = piece.getBoundingClientRect();
-  const centerX = rect.left + rect.width / 2;
-  const centerY = rect.top + rect.height / 2;
+  // Temporarily disable pointer events so elementFromPoint passes through the piece
+  piece.style.pointerEvents = 'none';
 
-  // 1. Check element directly under piece center
-  let dropElem = document.elementFromPoint(centerX, centerY);
-  let slot = dropElem ? dropElem.closest('.slot') : null;
-
-  // 2. Check bounding box match
-  if (!slot) {
-    slot = findSlotFromCoords(centerX, centerY);
+  let releaseX, releaseY;
+  if (e.changedTouches && e.changedTouches.length > 0) {
+    releaseX = e.changedTouches[0].clientX;
+    releaseY = e.changedTouches[0].clientY;
+  } else {
+    const rect = piece.getBoundingClientRect();
+    releaseX = rect.left + rect.width / 2;
+    releaseY = rect.top + rect.height / 2;
   }
 
-  // 3. Fallback to pointer touch coords
+  // Detect element underneath release coordinates
+  let dropElem = document.elementFromPoint(releaseX, releaseY);
+  let slot = dropElem ? dropElem.closest('.slot') : null;
+
   if (!slot) {
-    const coords = extractCoords(e);
-    slot = findSlotFromCoords(coords.x, coords.y);
+    slot = findSlotFromCoords(releaseX, releaseY);
   }
 
   const isOverTray = dropElem ? dropElem.closest('#tray') : null;
 
   let targetLocation = 'tray';
-
   if (slot) {
     targetLocation = `slot-${slot.dataset.index}`;
   } else if (isOverTray) {
