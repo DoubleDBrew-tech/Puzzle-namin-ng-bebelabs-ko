@@ -52,7 +52,7 @@ const board = document.getElementById('board');
 const tray = document.getElementById('tray');
 const gameStatus = document.getElementById('gameStatus');
 
-// --- AUTH & USER SESSION PERSISTENCE ---
+// --- AUTH & USER PERSISTENCE ---
 function initAuth() {
   if (playerName) {
     displayName.innerText = playerName;
@@ -171,12 +171,16 @@ function setupBoard(gridSize) {
     slot.dataset.index = i;
     board.appendChild(slot);
   }
-  tray.innerHTML = '';
 }
 setupBoard(currentGridSize);
 
 // --- INSTANT MULTIPLAYER GRID MODE SYNC ---
 gridSelect.addEventListener('change', async () => {
+  if (!localState || !localState.imageUrl) {
+    gameStatus.innerText = "⚠️ Upload an image first!";
+    return;
+  }
+
   const newSize = parseInt(gridSelect.value);
   const totalPieces = newSize * newSize;
   const trayOrder = generateShuffledOrder(totalPieces);
@@ -186,11 +190,7 @@ gridSelect.addEventListener('change', async () => {
     initialPieces[i] = 'tray';
   }
 
-  // Update board locally right away
-  currentGridSize = newSize;
-  setupBoard(newSize);
-
-  // Sync to Firebase so ALL players update instantly
+  // Update Firestore so ALL players re-slice and change grid instantly
   await setDoc(docRef, {
     gridSize: newSize,
     pieces: initialPieces,
@@ -262,7 +262,7 @@ function makePieceDraggable(piece) {
   });
 }
 
-// Render pieces and sync across all clients
+// Render pieces safely with persistence and zero data loss on refresh
 function renderPieces(state) {
   if (!state || !state.imageUrl) return;
   if (activePiece) return;
@@ -275,46 +275,44 @@ function renderPieces(state) {
     gridSelect.value = gridSize;
   }
 
-  // Force re-build board and clear pieces if grid size changed
-  const currentPiecesOnBoard = document.querySelectorAll('.piece').length;
-  if (currentGridSize !== gridSize || currentPiecesOnBoard !== totalPieces) {
+  // Re-build grid if size changed
+  if (currentGridSize !== gridSize || board.children.length !== totalPieces) {
     currentGridSize = gridSize;
     setupBoard(gridSize);
-    // Remove stale pieces completely
     document.querySelectorAll('.piece').forEach(p => p.remove());
   }
 
-  // Generate DOM pieces
-  if (document.querySelectorAll('.piece').length !== totalPieces) {
-    tray.innerHTML = '';
-    for (let i = 0; i < totalPieces; i++) {
-      const piece = document.createElement('div');
+  // 1. Maintain or build piece elements in memory
+  const piecesMap = {};
+  for (let i = 0; i < totalPieces; i++) {
+    let piece = document.getElementById(`piece-${i}`);
+    if (!piece) {
+      piece = document.createElement('div');
       piece.classList.add('piece');
       piece.id = `piece-${i}`;
       piece.dataset.index = i;
-      
-      piece.style.width = `${pieceSize}px`;
-      piece.style.height = `${pieceSize}px`;
-      
-      const row = Math.floor(i / gridSize);
-      const col = i % gridSize;
-      piece.style.backgroundImage = `url("${state.imageUrl}")`;
-      piece.style.backgroundSize = `${boardSize}px ${boardSize}px`;
-      piece.style.backgroundPosition = `-${col * pieceSize}px -${row * pieceSize}px`;
-      
       makePieceDraggable(piece);
-      tray.appendChild(piece);
     }
+    
+    piece.style.width = `${pieceSize}px`;
+    piece.style.height = `${pieceSize}px`;
+    
+    const row = Math.floor(i / gridSize);
+    const col = i % gridSize;
+    piece.style.backgroundImage = `url("${state.imageUrl}")`;
+    piece.style.backgroundSize = `${boardSize}px ${boardSize}px`;
+    piece.style.backgroundPosition = `-${col * pieceSize}px -${row * pieceSize}px`;
+
+    piecesMap[i] = piece;
   }
 
-  const trayOrder = state.trayOrder || Array.from({ length: totalPieces }, (_, i) => i);
-  
-  // Clear tray to re-render in correct order
+  // 2. Clear tray safely
   tray.innerHTML = '';
 
-  // Render tray pieces
+  // 3. Render pieces back into Tray according to trayOrder
+  const trayOrder = state.trayOrder || Array.from({ length: totalPieces }, (_, i) => i);
   trayOrder.forEach((pieceIdx) => {
-    const piece = document.getElementById(`piece-${pieceIdx}`);
+    const piece = piecesMap[pieceIdx];
     if (!piece) return;
     const loc = state.pieces ? state.pieces[pieceIdx] : 'tray';
     if (loc === 'tray' || !loc) {
@@ -322,9 +320,9 @@ function renderPieces(state) {
     }
   });
 
-  // Render board pieces
+  // 4. Render placed pieces into Board Slots
   for (let i = 0; i < totalPieces; i++) {
-    const piece = document.getElementById(`piece-${i}`);
+    const piece = piecesMap[i];
     if (!piece) continue;
     const loc = state.pieces ? state.pieces[i] : 'tray';
     if (loc && loc.startsWith('slot-')) {
@@ -518,7 +516,7 @@ resetBtn.addEventListener('click', async () => {
   }
 });
 
-// Real-time listener
+// Real-time Firestore listener
 onSnapshot(docRef, (docSnap) => {
   if (docSnap.exists()) {
     localState = docSnap.data();
