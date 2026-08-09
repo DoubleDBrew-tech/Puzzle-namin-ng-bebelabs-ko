@@ -226,35 +226,26 @@ async function onDragEnd(e) {
   const pieceIdx = piece.dataset.index;
   const pKey = `p_${pieceIdx}`;
 
-  // Clear active drag reference
-  activePiece = null;
-  activeTouchId = null;
+  const rect = piece.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
 
-  piece.style.pointerEvents = 'none';
-
-  let releaseX, releaseY;
-  if (e.changedTouches && e.changedTouches.length > 0) {
-    releaseX = e.changedTouches[0].clientX;
-    releaseY = e.changedTouches[0].clientY;
-  } else if (e.clientX !== undefined) {
-    releaseX = e.clientX;
-    releaseY = e.clientY;
-  } else {
-    const rect = piece.getBoundingClientRect();
-    releaseX = rect.left + rect.width / 2;
-    releaseY = rect.top + rect.height / 2;
-  }
-
-  let dropElem = document.elementFromPoint(releaseX, releaseY);
+  let dropElem = document.elementFromPoint(centerX, centerY);
   let slot = dropElem ? dropElem.closest('.slot') : null;
 
   if (!slot) {
-    slot = findSlotFromCoords(releaseX, releaseY);
+    slot = findSlotFromCoords(centerX, centerY);
+  }
+
+  if (!slot) {
+    const coords = extractCoords(e);
+    slot = findSlotFromCoords(coords.x, coords.y);
   }
 
   const isOverTray = dropElem ? dropElem.closest('#tray') : null;
 
   let targetLocation = 'tray';
+
   if (slot) {
     targetLocation = `slot-${slot.dataset.index}`;
   } else if (isOverTray) {
@@ -275,13 +266,14 @@ async function onDragEnd(e) {
   }
   localState.pieces[pKey] = targetLocation;
 
-  // Set pending lock key
+  // Lock this piece from being overwritten by background network snapshots
   pendingDropKey = pKey;
 
-  // Immediate local re-render to dock piece into the grid
-  renderPieces(localState);
+  // Clear references before rendering to ensure DOM resets properly
+  activePiece = null;
+  activeTouchId = null;
 
-  // Sync to Firestore
+  renderPieces(localState);
   await updatePieceLocation(pieceIdx, targetLocation);
 
   setTimeout(() => {
@@ -289,17 +281,23 @@ async function onDragEnd(e) {
   }, 1000);
 }
 
-// Global Event Listeners
+// Global Touch & Pointer Listeners
 window.addEventListener('touchmove', onDragMove, { passive: false });
 window.addEventListener('touchend', onDragEnd);
 window.addEventListener('touchcancel', onDragEnd);
 
 window.addEventListener('mousemove', onDragMove);
 window.addEventListener('mouseup', onDragEnd);
+window.addEventListener('mouseleave', onDragEnd); // Catch drags escaping the window
 
 function makePieceDraggable(piece) {
   const handleStart = async (e) => {
-    if (activePiece) return;
+    // Hard reset in case a previous drag got interrupted/stuck
+    if (activePiece) {
+      activePiece.classList.remove('dragging');
+      activePiece.style.pointerEvents = 'auto';
+      activePiece = null;
+    }
 
     const pieceIdx = piece.dataset.index;
     const pKey = `p_${pieceIdx}`;
@@ -380,13 +378,11 @@ function renderPieces(state) {
   const activeDrags = state.activeDrags || {};
 
   for (let i = 0; i < totalPieces; i++) {
-    const pKey = `p_${i}`;
-
-    // ONLY skip rendering if the user is actively holding/dragging the piece right now
     if (activePiece && parseInt(activePiece.dataset.index) === i) {
       continue;
     }
 
+    const pKey = `p_${i}`;
     let piece = document.getElementById(`piece-${i}`);
     
     if (!piece) {
@@ -423,7 +419,7 @@ function renderPieces(state) {
         tag.remove();
       }
       piece.style.opacity = '1';
-      piece.style.pointerEvents = 'auto';
+      piece.style.pointerEvents = 'auto'; // Re-enables interaction
     }
 
     const loc = piecesData[pKey] || 'tray';
@@ -697,7 +693,7 @@ onSnapshot(docRef, (docSnap) => {
   if (docSnap.exists()) {
     const serverData = docSnap.data();
     
-    // Preserve local drop position while database write completes
+    // Preserve local drop position while database write completes to avoid pieces bouncing back
     if (pendingDropKey && localState && localState.pieces && localState.pieces[pendingDropKey]) {
       if (!serverData.pieces) serverData.pieces = {};
       serverData.pieces[pendingDropKey] = localState.pieces[pendingDropKey];
