@@ -22,6 +22,7 @@ let currentGridSize = 4;
 let playerName = localStorage.getItem('bebelabs_user') || "";
 
 let activePiece = null;
+let activeTouchId = null;
 let dragOffset = { x: 0, y: 0 };
 
 // DOM Elements
@@ -182,9 +183,14 @@ function setupBoard(gridSize) {
 }
 setupBoard(currentGridSize);
 
-// Helper function to extract coordinates from both mouse/pointer and touch events
-function getCoords(e) {
+// --- TOUCH & POINTER HANDLING FOR IPAD ---
+function extractCoords(e) {
   if (e.touches && e.touches.length > 0) {
+    for (let i = 0; i < e.touches.length; i++) {
+      if (e.touches[i].identifier === activeTouchId) {
+        return { x: e.touches[i].clientX, y: e.touches[i].clientY };
+      }
+    }
     return { x: e.touches[0].clientX, y: e.touches[0].clientY };
   }
   if (e.changedTouches && e.changedTouches.length > 0) {
@@ -193,29 +199,31 @@ function getCoords(e) {
   return { x: e.clientX, y: e.clientY };
 }
 
-// --- GLOBAL DRAG MOVE AND RELEASE LISTENERS ---
-function handleMove(e) {
+function onDragMove(e) {
   if (!activePiece) return;
-  if (e.cancelable) e.preventDefault(); // Stop iPad native scroll while dragging
-  
-  const coords = getCoords(e);
+  if (e.cancelable) e.preventDefault();
+
+  const coords = extractCoords(e);
   activePiece.style.left = `${coords.x - dragOffset.x}px`;
   activePiece.style.top = `${coords.y - dragOffset.y}px`;
 }
 
-async function handleEnd(e) {
+async function onDragEnd(e) {
   if (!activePiece) return;
 
   const piece = activePiece;
-  activePiece = null;
+  const pieceIdx = piece.dataset.index;
 
-  const coords = getCoords(e);
+  const coords = extractCoords(e);
+
+  activePiece = null;
+  activeTouchId = null;
 
   piece.classList.remove('dragging');
   const tag = piece.querySelector('.player-tag');
   if (tag) tag.remove();
 
-  // Temporarily hide piece so elementFromPoint identifies underlying grid slot or tray
+  // Temporarily hide piece to detect drop slot underneath
   piece.style.display = 'none';
   const dropElem = document.elementFromPoint(coords.x, coords.y);
   piece.style.display = 'block';
@@ -227,7 +235,6 @@ async function handleEnd(e) {
   const slot = dropElem ? dropElem.closest('.slot') : null;
   const isOverTray = dropElem ? dropElem.closest('#tray') : null;
 
-  const pieceIdx = piece.dataset.index;
   let targetLocation = 'tray';
 
   if (slot) {
@@ -255,15 +262,16 @@ async function handleEnd(e) {
   await updatePieceLocation(pieceIdx, targetLocation);
 }
 
-window.addEventListener('pointermove', handleMove, { passive: false });
-window.addEventListener('touchmove', handleMove, { passive: false });
+// Global Touch and Pointer Event Listeners
+window.addEventListener('touchmove', onDragMove, { passive: false });
+window.addEventListener('touchend', onDragEnd);
+window.addEventListener('touchcancel', onDragEnd);
 
-window.addEventListener('pointerup', handleEnd);
-window.addEventListener('touchend', handleEnd);
+window.addEventListener('pointermove', onDragMove);
+window.addEventListener('pointerup', onDragEnd);
 
-// --- DRAG ENGINE & REAL-TIME SYNC ---
 function makePieceDraggable(piece) {
-  const startDrag = async (e) => {
+  const handleStart = async (e) => {
     const pieceIdx = piece.dataset.index;
     const pKey = `p_${pieceIdx}`;
 
@@ -272,9 +280,13 @@ function makePieceDraggable(piece) {
     }
 
     if (e.cancelable) e.preventDefault();
-    activePiece = piece;
 
-    const coords = getCoords(e);
+    activePiece = piece;
+    if (e.touches && e.touches.length > 0) {
+      activeTouchId = e.touches[0].identifier;
+    }
+
+    const coords = extractCoords(e);
     const rect = piece.getBoundingClientRect();
     dragOffset.x = coords.x - rect.left;
     dragOffset.y = coords.y - rect.top;
@@ -304,8 +316,8 @@ function makePieceDraggable(piece) {
     }
   };
 
-  piece.addEventListener('pointerdown', startDrag);
-  piece.addEventListener('touchstart', startDrag, { passive: false });
+  piece.addEventListener('touchstart', handleStart, { passive: false });
+  piece.addEventListener('mousedown', handleStart);
 }
 
 function renderPieces(state) {
@@ -336,6 +348,11 @@ function renderPieces(state) {
   const activeDrags = state.activeDrags || {};
 
   for (let i = 0; i < totalPieces; i++) {
+    // CRITICAL FOR IPAD: Skip processing the active piece currently being dragged locally
+    if (activePiece && parseInt(activePiece.dataset.index) === i) {
+      continue;
+    }
+
     const pKey = `p_${i}`;
     let piece = document.getElementById(`piece-${i}`);
     
@@ -356,8 +373,6 @@ function renderPieces(state) {
     piece.style.backgroundImage = `url("${state.imageUrl}")`;
     piece.style.backgroundSize = `${boardSize}px ${boardSize}px`;
     piece.style.backgroundPosition = `-${col * pieceSize}px -${row * pieceSize}px`;
-
-    if (activePiece && activePiece.dataset.index == i) continue;
 
     const holdingPlayer = activeDrags[pKey];
     let tag = piece.querySelector('.player-tag');
@@ -632,7 +647,7 @@ resetBtn.addEventListener('click', async () => {
   }
 });
 
-// Firestore listener
+// Real-time Firestore Listener
 onSnapshot(docRef, (docSnap) => {
   if (docSnap.exists()) {
     localState = docSnap.data();
