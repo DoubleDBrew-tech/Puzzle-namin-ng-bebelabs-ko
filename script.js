@@ -183,7 +183,7 @@ function setupBoard(gridSize) {
 }
 setupBoard(currentGridSize);
 
-// --- TOUCH & POINTER HANDLING FOR IPAD ---
+// --- TOUCH & POINTER HANDLING ---
 function extractCoords(e) {
   if (e.touches && e.touches.length > 0) {
     for (let i = 0; i < e.touches.length; i++) {
@@ -219,7 +219,6 @@ function findSlotFromCoords(x, y) {
   return null;
 }
 
-// Reset inline position styles when dropped so piece fits slot 100%
 function resetPieceStyles(piece) {
   piece.classList.remove('dragging');
   piece.style.position = 'relative';
@@ -238,51 +237,51 @@ async function onDragEnd(e) {
 
   const piece = activePiece;
   const pieceIdx = piece.dataset.index;
-  const coords = extractCoords(e);
+  const pKey = `p_${pieceIdx}`;
 
-  activePiece = null;
-  activeTouchId = null;
+  // Find slot using the center coordinates of the dragged piece
+  const rect = piece.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
 
-  // Find slot before resetting element styles
-  let dropElem = document.elementFromPoint(coords.x, coords.y);
-  let slot = dropElem ? dropElem.closest('.slot') : null;
+  let slot = findSlotFromCoords(centerX, centerY);
 
   if (!slot) {
+    const coords = extractCoords(e);
     slot = findSlotFromCoords(coords.x, coords.y);
   }
 
+  const dropElem = document.elementFromPoint(centerX, centerY);
   const isOverTray = dropElem ? dropElem.closest('#tray') : null;
-
-  // Clear dragging fixed positioning
-  resetPieceStyles(piece);
 
   let targetLocation = 'tray';
 
   if (slot) {
     targetLocation = `slot-${slot.dataset.index}`;
-    const existingPiece = slot.querySelector('.piece');
-    if (existingPiece && existingPiece !== piece) {
-      tray.appendChild(existingPiece);
-      resetPieceStyles(existingPiece);
-    }
-    slot.appendChild(piece);
   } else if (isOverTray) {
     targetLocation = 'tray';
-    tray.appendChild(piece);
   } else {
-    targetLocation = (localState?.pieces?.[`p_${pieceIdx}`]) || 'tray';
-    if (targetLocation.startsWith('slot-')) {
-      const sIdx = targetLocation.split('-')[1];
-      const targetSlot = document.querySelector(`.slot[data-index="${sIdx}"]`);
-      if (targetSlot) {
-        targetSlot.appendChild(piece);
-      } else {
-        tray.appendChild(piece);
-      }
-    } else {
-      tray.appendChild(piece);
-    }
+    targetLocation = localState?.pieces?.[pKey] || 'tray';
   }
+
+  // Update local state synchronously first to prevent snapshot rollback
+  if (!localState) localState = {};
+  if (!localState.pieces) localState.pieces = {};
+
+  if (targetLocation.startsWith('slot-')) {
+    Object.keys(localState.pieces).forEach(k => {
+      if (localState.pieces[k] === targetLocation && k !== pKey) {
+        localState.pieces[k] = 'tray';
+      }
+    });
+  }
+  localState.pieces[pKey] = targetLocation;
+
+  activePiece = null;
+  activeTouchId = null;
+
+  resetPieceStyles(piece);
+  renderPieces(localState);
 
   await updatePieceLocation(pieceIdx, targetLocation);
 }
@@ -316,7 +315,6 @@ function makePieceDraggable(piece) {
     dragOffset.x = coords.x - rect.left;
     dragOffset.y = coords.y - rect.top;
 
-    // Set dragging dimensions to match actual calculated piece size
     const pSize = boardSize / (currentGridSize || 4);
     piece.style.width = `${pSize}px`;
     piece.style.height = `${pSize}px`;
@@ -398,7 +396,6 @@ function renderPieces(state) {
     const row = Math.floor(i / gridSize);
     const col = i % gridSize;
     
-    // Percentage-based background scaling to align cleanly in slot grid
     piece.style.backgroundImage = `url("${state.imageUrl}")`;
     piece.style.backgroundSize = `${gridSize * 100}% ${gridSize * 100}%`;
     piece.style.backgroundPosition = gridSize > 1 
@@ -438,7 +435,6 @@ function renderPieces(state) {
         tray.appendChild(piece);
         resetPieceStyles(piece);
       }
-      // Give tray pieces their explicit size
       piece.style.width = `${pieceSize}px`;
       piece.style.height = `${pieceSize}px`;
     }
