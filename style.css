@@ -27,7 +27,6 @@ h1 { color: #d81b60; margin: 0; }
   gap: 10px;
 }
 
-/* Modal Popup (for Hint only) */
 .modal {
   display: none;
   position: fixed;
@@ -65,7 +64,6 @@ h1 { color: #d81b60; margin: 0; }
   margin-top: 10px;
 }
 
-/* PAGE 1: Welcome Screen Overlay */
 #welcomeScreen {
   position: fixed;
   inset: 0;
@@ -124,7 +122,6 @@ h1 { color: #d81b60; margin: 0; }
   100% { transform: translateY(105vh) rotate(360deg); opacity: 0.2; }
 }
 
-/* Controls & Game Area */
 #controls {
   margin-bottom: 15px;
   display: flex;
@@ -184,7 +181,6 @@ button:hover { background-color: #e91e63; }
   transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
-/* ERROR VIBRATE ANIMATION */
 .shake-error {
   animation: shakeVibrate 0.5s ease-in-out;
   border-color: #f44336 !important;
@@ -199,7 +195,6 @@ button:hover { background-color: #e91e63; }
   80% { transform: translateX(8px); }
 }
 
-/* VICTORY CELEBRATION ANIMATION */
 .celebrate-win {
   animation: winGlow 1s ease-in-out infinite alternate;
   border-color: #4caf50 !important;
@@ -236,7 +231,6 @@ button:hover { background-color: #e91e63; }
   position: relative;
 }
 
-/* Piece Visibility & Dragging Styles */
 .piece {
   cursor: grab;
   box-sizing: border-box;
@@ -272,7 +266,6 @@ button:hover { background-color: #e91e63; }
   pointer-events: none;
 }
 
-/* Celebration Overlay */
 #celebrationOverlay {
   position: fixed;
   inset: 0;
@@ -291,7 +284,6 @@ button:hover { background-color: #e91e63; }
   100% { transform: translate(var(--tx), var(--ty)) rotate(var(--rot)) scale(1.5); opacity: 0; }
 }
 
-/* PAGE 3: Dedicated History Page */
 #historyPage {
   display: none;
   position: fixed;
