@@ -27,7 +27,7 @@ h1 { color: #d81b60; margin: 0; }
   gap: 10px;
 }
 
-/* Modals */
+/* Modal Popup (for Hint only) */
 .modal {
   display: none;
   position: fixed;
@@ -65,7 +65,7 @@ h1 { color: #d81b60; margin: 0; }
   margin-top: 10px;
 }
 
-/* Welcome Screen */
+/* PAGE 1: Welcome Screen Overlay */
 #welcomeScreen {
   position: fixed;
   inset: 0;
@@ -124,7 +124,7 @@ h1 { color: #d81b60; margin: 0; }
   100% { transform: translateY(105vh) rotate(360deg); opacity: 0.2; }
 }
 
-/* Controls & Buttons */
+/* Controls & Game Area */
 #controls {
   margin-bottom: 15px;
   display: flex;
@@ -236,13 +236,18 @@ button:hover { background-color: #e91e63; }
   position: relative;
 }
 
+/* Piece Visibility & Dragging Styles */
 .piece {
   cursor: grab;
   box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.6);
   box-shadow: 0 1px 3px rgba(0,0,0,0.3);
   touch-action: none;
   position: relative;
+  background-repeat: no-repeat;
+  background-color: #f8bbd0;
+  display: block;
+  z-index: 10;
 }
 
 .piece.dragging {
@@ -286,12 +291,53 @@ button:hover { background-color: #e91e63; }
   100% { transform: translate(var(--tx), var(--ty)) rotate(var(--rot)) scale(1.5); opacity: 0; }
 }
 
+/* PAGE 3: Dedicated History Page */
+#historyPage {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background-color: #ffe4e8;
+  z-index: 8888;
+  padding: 30px 20px;
+  overflow-y: auto;
+}
+
+.history-container {
+  max-width: 800px;
+  margin: 0 auto;
+  background: #ffffff;
+  padding: 30px;
+  border-radius: 20px;
+  box-shadow: 0 10px 30px rgba(233, 30, 99, 0.15);
+  border: 3px solid #f06292;
+}
+
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 15px;
+  margin-bottom: 10px;
+}
+
+.history-subtitle {
+  color: #ad1457;
+  font-size: 1.1em;
+  margin-bottom: 25px;
+}
+
 .rank-card {
   background: #fff0f3;
-  border: 1px solid #f8bbd0;
-  padding: 12px;
-  margin: 10px 0;
-  border-radius: 8px;
+  border: 2px solid #f8bbd0;
+  padding: 15px 20px;
+  margin: 12px 0;
+  border-radius: 12px;
   text-align: left;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
-.rank-card h3 { margin: 0 0 5px 0; color: #c2185b; }
+
+.rank-card h3 { margin: 0; color: #c2185b; font-size: 1.2em; }
+.rank-card p { margin: 0; font-size: 1.1em; color: #880e4f; }
