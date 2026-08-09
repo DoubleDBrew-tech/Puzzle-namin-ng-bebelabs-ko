@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot, updateDoc, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAB3HwQfyL32dYL473BG5_bUlGXk30p_-A",
@@ -15,21 +15,33 @@ const db = getFirestore(app);
 
 const boardSize = 600; 
 const docRef = doc(db, "games", "puzzleState");
+const historyDocRef = doc(db, "games", "puzzleHistory");
 
 let localState = null;
 let currentGridSize = 4;
-let playerName = "Player";
+let playerName = localStorage.getItem('bebelabs_user') || "";
 
-// Drag state tracking
 let activePiece = null;
 let dragOffset = { x: 0, y: 0 };
 
-// UI Elements
+// DOM Elements
 const welcomeScreen = document.getElementById('welcomeScreen');
 const playerNameInput = document.getElementById('playerNameInput');
 const enterGameBtn = document.getElementById('enterGameBtn');
-const heartsContainer = document.getElementById('heartsContainer');
+const displayName = document.getElementById('displayName');
+const leaveBtn = document.getElementById('leaveBtn');
 
+const hintModal = document.getElementById('hintModal');
+const hintImage = document.getElementById('hintImage');
+const hintBtn = document.getElementById('hintBtn');
+const closeHint = document.getElementById('closeHint');
+
+const historyModal = document.getElementById('historyModal');
+const historyStats = document.getElementById('historyStats');
+const historyBtn = document.getElementById('historyBtn');
+const closeHistory = document.getElementById('closeHistory');
+
+const finishBtn = document.getElementById('finishBtn');
 const uploadBtn = document.getElementById('uploadBtn');
 const imageUpload = document.getElementById('imageUpload');
 const resetBtn = document.getElementById('resetBtn');
@@ -38,11 +50,35 @@ const board = document.getElementById('board');
 const tray = document.getElementById('tray');
 const gameStatus = document.getElementById('gameStatus');
 
-// --- WELCOME SCREEN & HEARTS ANIMATION ---
-function initWelcomeScreen() {
-  // Create falling hearts & text
-  const items = ["💖", "💕", "❤️", "I Love Leigh", "Leigh ❤️", " Carlo ❤️"];
-  for (let i = 0; i < 25; i++) {
+// --- AUTH & USER SESSION PERSISTENCE ---
+function initAuth() {
+  if (playerName) {
+    displayName.innerText = playerName;
+    welcomeScreen.style.display = 'none';
+  } else {
+    welcomeScreen.style.display = 'flex';
+  }
+
+  enterGameBtn.addEventListener('click', () => {
+    const val = playerNameInput.value.trim();
+    if (val !== "") {
+      playerName = val;
+      localStorage.setItem('bebelabs_user', playerName);
+      displayName.innerText = playerName;
+      welcomeScreen.style.display = 'none';
+    }
+  });
+
+  leaveBtn.addEventListener('click', () => {
+    localStorage.removeItem('bebelabs_user');
+    playerName = "";
+    welcomeScreen.style.display = 'flex';
+  });
+
+  // Falling Hearts
+  const items = ["💖", "💕", "❤️", "I Love Leigh", "Leigh ❤️", "Carlo ❤️"];
+  const heartsContainer = document.getElementById('heartsContainer');
+  for (let i = 0; i < 20; i++) {
     const item = document.createElement('div');
     item.className = 'falling-item';
     item.innerText = items[Math.floor(Math.random() * items.length)];
@@ -52,22 +88,41 @@ function initWelcomeScreen() {
     item.style.fontSize = `${14 + Math.random() * 12}px`;
     heartsContainer.appendChild(item);
   }
-
-  enterGameBtn.addEventListener('click', () => {
-    const inputVal = playerNameInput.value.trim();
-    if (inputVal !== "") playerName = inputVal;
-    welcomeScreen.style.display = 'none';
-  });
 }
+initAuth();
 
-initWelcomeScreen();
-
-// Grid selector listener
-gridSelect.addEventListener('change', () => {
-  setupBoard(parseInt(gridSelect.value));
+// --- MODALS (HINT & HISTORY) ---
+hintBtn.addEventListener('click', () => {
+  if (localState && localState.imageUrl) {
+    hintImage.src = localState.imageUrl;
+    hintModal.style.display = 'flex';
+  } else {
+    alert("Upload a puzzle picture first!");
+  }
 });
+closeHint.addEventListener('click', () => hintModal.style.display = 'none');
 
-// Image process helper
+historyBtn.addEventListener('click', async () => {
+  historyModal.style.display = 'flex';
+  historyStats.innerHTML = "Fetching stats...";
+  
+  const snap = await getDoc(historyDocRef);
+  if (snap.exists()) {
+    const data = snap.data();
+    historyStats.innerHTML = `
+      <div class="rank-card"><h3>🌱 2x2 Beginner Rank:</h3> <p>Completed: <strong>${data['rank_2'] || 0}</strong></p></div>
+      <div class="rank-card"><h3>🐣 3x3 Novice Rank:</h3> <p>Completed: <strong>${data['rank_3'] || 0}</strong></p></div>
+      <div class="rank-card"><h3>⭐ 4x4 Intermediate Rank:</h3> <p>Completed: <strong>${data['rank_4'] || 0}</strong></p></div>
+      <div class="rank-card"><h3>🔥 6x6 Advanced Rank:</h3> <p>Completed: <strong>${data['rank_6'] || 0}</strong></p></div>
+      <div class="rank-card"><h3>👑 10x10 Master Rank:</h3> <p>Completed: <strong>${data['rank_10'] || 0}</strong></p></div>
+    `;
+  } else {
+    historyStats.innerHTML = "<p>No puzzles completed yet. Be the first to finish one!</p>";
+  }
+});
+closeHistory.addEventListener('click', () => historyModal.style.display = 'none');
+
+// Image processing helper
 function processImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -81,10 +136,10 @@ function processImage(file) {
         ctx.drawImage(img, 0, 0, 500, 500);
         resolve(canvas.toDataURL('image/jpeg', 0.6));
       };
-      img.onerror = () => reject("Failed to process image.");
+      img.onerror = reject;
       img.src = e.target.result;
     };
-    reader.onerror = () => reject("Failed to read file.");
+    reader.onerror = reject;
     reader.readAsDataURL(file);
   });
 }
@@ -101,19 +156,15 @@ function setupBoard(gridSize) {
     slot.dataset.index = i;
     board.appendChild(slot);
   }
-  
   tray.innerHTML = '';
 }
-
 setupBoard(currentGridSize);
 
-// --- TOUCH & MOUSE POINTER DRAG ENGINE ---
+// --- DRAG ENGINE & POSITION SYNC ---
 function makePieceDraggable(piece) {
   piece.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     activePiece = piece;
-    
-    // Set pointer capture for smooth tracking on iPad
     piece.setPointerCapture(e.pointerId);
     
     const rect = piece.getBoundingClientRect();
@@ -121,17 +172,11 @@ function makePieceDraggable(piece) {
     dragOffset.y = e.clientY - rect.top;
 
     piece.classList.add('dragging');
-    
-    // Attach Player Name Badge while dragging
-    let tag = piece.querySelector('.player-tag');
-    if (!tag) {
-      tag = document.createElement('div');
-      tag.className = 'player-tag';
-      piece.appendChild(tag);
-    }
+    let tag = piece.querySelector('.player-tag') || document.createElement('div');
+    tag.className = 'player-tag';
     tag.innerText = `Holding: ${playerName}`;
+    piece.appendChild(tag);
 
-    // Move piece to fixed positioning overlay while dragging
     piece.style.position = 'fixed';
     piece.style.left = `${e.clientX - dragOffset.x}px`;
     piece.style.top = `${e.clientY - dragOffset.y}px`;
@@ -148,8 +193,6 @@ function makePieceDraggable(piece) {
     
     piece.releasePointerCapture(e.pointerId);
     piece.classList.remove('dragging');
-    
-    // Remove Name Badge tag
     const tag = piece.querySelector('.player-tag');
     if (tag) tag.remove();
 
@@ -157,7 +200,6 @@ function makePieceDraggable(piece) {
     piece.style.left = '0px';
     piece.style.top = '0px';
 
-    // Find drop target under current finger/mouse location
     piece.style.visibility = 'hidden';
     const dropElem = document.elementFromPoint(e.clientX, e.clientY);
     piece.style.visibility = 'visible';
@@ -168,8 +210,11 @@ function makePieceDraggable(piece) {
     let targetLocation = 'tray';
     if (slot) {
       targetLocation = `slot-${slot.dataset.index}`;
-    } else if (!isOverTray) {
-      targetLocation = 'tray'; // Default back to tray if dropped outside
+    } else if (isOverTray) {
+      targetLocation = 'tray';
+    } else {
+      // Keep inside current slot or tray if dropped off-screen
+      targetLocation = localState.pieces[piece.dataset.index] || 'tray';
     }
 
     activePiece = null;
@@ -177,18 +222,15 @@ function makePieceDraggable(piece) {
   });
 }
 
-// Render puzzle state
 function renderPieces(state) {
   if (!state || !state.imageUrl) return;
-  if (activePiece) return; // Prevent re-render glitches while user is actively dragging
+  if (activePiece) return;
 
   const gridSize = state.gridSize || 4;
   const totalPieces = gridSize * gridSize;
   const pieceSize = boardSize / gridSize;
 
-  if (gridSelect.value != gridSize) {
-    gridSelect.value = gridSize;
-  }
+  if (gridSelect.value != gridSize) gridSelect.value = gridSize;
 
   if (currentGridSize !== gridSize || board.children.length !== totalPieces) {
     currentGridSize = gridSize;
@@ -217,8 +259,7 @@ function renderPieces(state) {
     }
   }
 
-  // Update piece positions from Firestore
-  let correctCount = 0;
+  // Update piece positions from database
   for (let i = 0; i < totalPieces; i++) {
     const piece = document.getElementById(`piece-${i}`);
     if (!piece) continue;
@@ -229,22 +270,15 @@ function renderPieces(state) {
     } else if (location.startsWith('slot-')) {
       const slotIndex = location.split('-')[1];
       const slot = document.querySelector(`.slot[data-index="${slotIndex}"]`);
-      if (slot) {
-        slot.appendChild(piece);
-        if (slotIndex == i) correctCount++;
-      }
+      if (slot) slot.appendChild(piece);
     }
   }
 
-  checkWinCondition(correctCount, totalPieces);
-}
-
-function checkWinCondition(correctCount, total) {
-  if (correctCount === total && total > 0) {
-    gameStatus.innerText = "🎉 Puzzle Complete! Perfect job! 🎉";
+  if (state.completed) {
+    gameStatus.innerText = "🎉 Puzzle Completed & Logged in History! 🎉";
     gameStatus.style.color = "#4caf50";
   } else {
-    gameStatus.innerText = `Solving puzzle (${correctCount}/${total} pieces placed correctly)`;
+    gameStatus.innerText = "Drag pieces to solve, then click Finish Puzzle!";
     gameStatus.style.color = "#d81b60";
   }
 }
@@ -263,7 +297,38 @@ async function updatePieceLocation(pieceIndex, targetLocation) {
   await setDoc(docRef, { pieces: localState.pieces }, { merge: true });
 }
 
-// Upload picture handler
+// --- SUBMIT / FINISH PUZZLE LOGIC ---
+finishBtn.addEventListener('click', async () => {
+  if (!localState || !localState.pieces) return;
+  
+  const gridSize = localState.gridSize || 4;
+  const totalPieces = gridSize * gridSize;
+  let correctCount = 0;
+
+  for (let i = 0; i < totalPieces; i++) {
+    const loc = localState.pieces[i];
+    if (loc === `slot-${i}`) correctCount++;
+  }
+
+  if (correctCount === totalPieces) {
+    alert(`🎉 Congratulations ${playerName}! You correctly solved the ${gridSize}x${gridSize} puzzle!`);
+    
+    // Mark completed & increment rank history in database
+    await setDoc(docRef, { completed: true }, { merge: true });
+    
+    const rankKey = `rank_${gridSize}`;
+    try {
+      await updateDoc(historyDocRef, { [rankKey]: increment(1) });
+    } catch (e) {
+      // Initialize document if missing
+      await setDoc(historyDocRef, { [rankKey]: 1 }, { merge: true });
+    }
+  } else {
+    alert(`❌ Puzzle is not finished yet! (${correctCount}/${totalPieces} pieces are in the correct place)`);
+  }
+});
+
+// --- SHUFFLE & UPLOAD ---
 uploadBtn.addEventListener('click', async () => {
   const file = imageUpload.files[0];
   if (!file) {
@@ -274,11 +339,12 @@ uploadBtn.addEventListener('click', async () => {
   const gridSize = parseInt(gridSelect.value);
   const totalPieces = gridSize * gridSize;
 
-  gameStatus.innerText = "Creating puzzle pieces...";
+  gameStatus.innerText = "Creating randomized puzzle...";
   
   try {
     const dataUrl = await processImage(file);
     
+    // Create array of randomized tray slots
     const initialPieces = {};
     for (let i = 0; i < totalPieces; i++) {
       initialPieces[i] = 'tray';
@@ -287,18 +353,17 @@ uploadBtn.addEventListener('click', async () => {
     await setDoc(docRef, {
       imageUrl: dataUrl,
       gridSize: gridSize,
-      pieces: initialPieces
+      pieces: initialPieces,
+      completed: false
     });
     
     document.querySelectorAll('.piece').forEach(p => p.remove());
-    gameStatus.innerText = "Puzzle ready! Touch and drag pieces to solve.";
+    gameStatus.innerText = "Puzzle ready!";
   } catch (err) {
-    console.error(err);
-    alert("Could not process picture. Try another photo.");
+    alert("Error processing picture. Try another image.");
   }
 });
 
-// Reset puzzle handler
 resetBtn.addEventListener('click', async () => {
   if (localState && localState.gridSize) {
     const totalPieces = localState.gridSize * localState.gridSize;
@@ -306,16 +371,13 @@ resetBtn.addEventListener('click', async () => {
     for (let i = 0; i < totalPieces; i++) {
       initialPieces[i] = 'tray';
     }
-    await setDoc(docRef, { pieces: initialPieces }, { merge: true });
+    await setDoc(docRef, { pieces: initialPieces, completed: false }, { merge: true });
   }
 });
 
-// Real-time Firestore sync
 onSnapshot(docRef, (docSnap) => {
   if (docSnap.exists()) {
     localState = docSnap.data();
-    if (localState.imageUrl) {
-      renderPieces(localState);
-    }
+    if (localState.imageUrl) renderPieces(localState);
   }
 });
