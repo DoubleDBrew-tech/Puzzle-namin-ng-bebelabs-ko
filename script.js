@@ -24,6 +24,7 @@ let playerName = localStorage.getItem('bebelabs_user') || "";
 let activePiece = null;
 let activeTouchId = null;
 let dragOffset = { x: 0, y: 0 };
+let pendingDropKey = null; // Prevents real-time listener overwrites during active drops
 
 // DOM Elements
 const welcomeScreen = document.getElementById('welcomeScreen');
@@ -225,7 +226,10 @@ async function onDragEnd(e) {
   const pieceIdx = piece.dataset.index;
   const pKey = `p_${pieceIdx}`;
 
-  // Temporarily disable pointer events so elementFromPoint passes through the piece
+  // Lock this piece from being immediately overwritten by background snapshots
+  pendingDropKey = pKey;
+
+  // Temporarily disable pointer events so elementFromPoint looks through the dragged piece
   piece.style.pointerEvents = 'none';
 
   let releaseX, releaseY;
@@ -257,7 +261,7 @@ async function onDragEnd(e) {
     targetLocation = localState?.pieces?.[pKey] || 'tray';
   }
 
-  // Update local state instantly before remote snapshot
+  // Update local state instantly before remote snapshot arrives
   if (!localState) localState = {};
   if (!localState.pieces) localState.pieces = {};
 
@@ -275,6 +279,11 @@ async function onDragEnd(e) {
 
   renderPieces(localState);
   await updatePieceLocation(pieceIdx, targetLocation);
+
+  // Release lock after network sync completes
+  setTimeout(() => {
+    if (pendingDropKey === pKey) pendingDropKey = null;
+  }, 300);
 }
 
 // Global Touch & Pointer Listeners
@@ -368,11 +377,13 @@ function renderPieces(state) {
   const activeDrags = state.activeDrags || {};
 
   for (let i = 0; i < totalPieces; i++) {
-    if (activePiece && parseInt(activePiece.dataset.index) === i) {
+    const pKey = `p_${i}`;
+
+    // Prevent rendering collision if actively dragging or in middle of drop sync
+    if ((activePiece && parseInt(activePiece.dataset.index) === i) || pendingDropKey === pKey) {
       continue;
     }
 
-    const pKey = `p_${i}`;
     let piece = document.getElementById(`piece-${i}`);
     
     if (!piece) {
