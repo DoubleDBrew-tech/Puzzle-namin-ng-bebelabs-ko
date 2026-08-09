@@ -137,7 +137,6 @@ hintBtn.addEventListener('click', () => {
 });
 closeHint.addEventListener('click', () => hintModal.style.display = 'none');
 
-// Image processing helper
 function processImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -219,19 +218,6 @@ function findSlotFromCoords(x, y) {
   return null;
 }
 
-function resetPieceStyles(piece) {
-  piece.classList.remove('dragging');
-  piece.style.position = 'relative';
-  piece.style.left = '';
-  piece.style.top = '';
-  piece.style.width = '';
-  piece.style.height = '';
-  piece.style.pointerEvents = 'auto';
-
-  const tag = piece.querySelector('.player-tag');
-  if (tag) tag.remove();
-}
-
 async function onDragEnd(e) {
   if (!activePiece) return;
 
@@ -239,19 +225,26 @@ async function onDragEnd(e) {
   const pieceIdx = piece.dataset.index;
   const pKey = `p_${pieceIdx}`;
 
-  // Find slot using the center coordinates of the dragged piece
+  // Find center point of dragged piece
   const rect = piece.getBoundingClientRect();
   const centerX = rect.left + rect.width / 2;
   const centerY = rect.top + rect.height / 2;
 
-  let slot = findSlotFromCoords(centerX, centerY);
+  // 1. Check element directly under piece center
+  let dropElem = document.elementFromPoint(centerX, centerY);
+  let slot = dropElem ? dropElem.closest('.slot') : null;
 
+  // 2. Check bounding box match
+  if (!slot) {
+    slot = findSlotFromCoords(centerX, centerY);
+  }
+
+  // 3. Fallback to pointer touch coords
   if (!slot) {
     const coords = extractCoords(e);
     slot = findSlotFromCoords(coords.x, coords.y);
   }
 
-  const dropElem = document.elementFromPoint(centerX, centerY);
   const isOverTray = dropElem ? dropElem.closest('#tray') : null;
 
   let targetLocation = 'tray';
@@ -264,7 +257,7 @@ async function onDragEnd(e) {
     targetLocation = localState?.pieces?.[pKey] || 'tray';
   }
 
-  // Update local state synchronously first to prevent snapshot rollback
+  // Update local state instantly before remote snapshot
   if (!localState) localState = {};
   if (!localState.pieces) localState.pieces = {};
 
@@ -280,22 +273,22 @@ async function onDragEnd(e) {
   activePiece = null;
   activeTouchId = null;
 
-  resetPieceStyles(piece);
   renderPieces(localState);
-
   await updatePieceLocation(pieceIdx, targetLocation);
 }
 
-// Global Touch and Pointer Event Listeners
+// Global Touch & Pointer Listeners
 window.addEventListener('touchmove', onDragMove, { passive: false });
 window.addEventListener('touchend', onDragEnd);
 window.addEventListener('touchcancel', onDragEnd);
 
-window.addEventListener('pointermove', onDragMove);
-window.addEventListener('pointerup', onDragEnd);
+window.addEventListener('mousemove', onDragMove);
+window.addEventListener('mouseup', onDragEnd);
 
 function makePieceDraggable(piece) {
   const handleStart = async (e) => {
+    if (activePiece) return;
+
     const pieceIdx = piece.dataset.index;
     const pKey = `p_${pieceIdx}`;
 
@@ -316,11 +309,13 @@ function makePieceDraggable(piece) {
     dragOffset.y = coords.y - rect.top;
 
     const pSize = boardSize / (currentGridSize || 4);
+    piece.style.position = 'fixed';
     piece.style.width = `${pSize}px`;
     piece.style.height = `${pSize}px`;
-
-    piece.classList.add('dragging');
+    piece.style.left = `${coords.x - dragOffset.x}px`;
+    piece.style.top = `${coords.y - dragOffset.y}px`;
     piece.style.pointerEvents = 'none';
+    piece.classList.add('dragging');
 
     let tag = piece.querySelector('.player-tag');
     if (!tag) {
@@ -329,10 +324,6 @@ function makePieceDraggable(piece) {
       piece.appendChild(tag);
     }
     tag.innerText = `Holding: ${playerName || "Player"}`;
-
-    piece.style.position = 'fixed';
-    piece.style.left = `${coords.x - dragOffset.x}px`;
-    piece.style.top = `${coords.y - dragOffset.y}px`;
 
     document.body.appendChild(piece);
 
@@ -426,17 +417,25 @@ function renderPieces(state) {
     if (loc.startsWith('slot-')) {
       const slotIndex = loc.split('-')[1];
       const slot = document.querySelector(`.slot[data-index="${slotIndex}"]`);
-      if (slot && piece.parentElement !== slot) {
+      if (slot) {
         slot.appendChild(piece);
-        resetPieceStyles(piece);
+        piece.style.position = 'relative';
+        piece.style.left = '0';
+        piece.style.top = '0';
+        piece.style.width = '100%';
+        piece.style.height = '100%';
+        piece.style.pointerEvents = 'auto';
+        piece.classList.remove('dragging');
       }
     } else {
-      if (piece.parentElement !== tray) {
-        tray.appendChild(piece);
-        resetPieceStyles(piece);
-      }
+      tray.appendChild(piece);
+      piece.style.position = 'relative';
+      piece.style.left = '0';
+      piece.style.top = '0';
       piece.style.width = `${pieceSize}px`;
       piece.style.height = `${pieceSize}px`;
+      piece.style.pointerEvents = 'auto';
+      piece.classList.remove('dragging');
     }
   }
 
