@@ -1,8 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 
-// Your custom Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyAB3HwQfyL32dYL473BG5_bUlGXk30p_-A",
   authDomain: "for-my-bebelabs.firebaseapp.com",
@@ -14,62 +12,94 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
-const storage = getStorage(app);
 
-const gridSize = 4; // 4x4 puzzle
-const pieceSize = 150; // 150px per piece
 const boardSize = 600; 
-
-// Document reference where the puzzle state will live
 const docRef = doc(db, "games", "puzzleState");
 
 let localState = null;
 let isDragging = false; 
+let currentGridSize = 4;
 
-// UI Elements
 const uploadBtn = document.getElementById('uploadBtn');
 const imageUpload = document.getElementById('imageUpload');
 const resetBtn = document.getElementById('resetBtn');
+const gridSelect = document.getElementById('gridSelect');
 const board = document.getElementById('board');
 const tray = document.getElementById('tray');
 const gameStatus = document.getElementById('gameStatus');
 
-// Initialize the empty board slots
-function setupBoard() {
+// Convert and resize uploaded image locally using HTML5 Canvas
+function processImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = boardSize;
+        canvas.height = boardSize;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, boardSize, boardSize);
+        // Returns compressed image string directly
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// Build empty board slots dynamically
+function setupBoard(gridSize) {
   board.innerHTML = '';
-  for (let i = 0; i < gridSize * gridSize; i++) {
+  board.style.gridTemplateColumns = `repeat(${gridSize}, 1fr)`;
+  board.style.gridTemplateRows = `repeat(${gridSize}, 1fr)`;
+  
+  const totalSlots = gridSize * gridSize;
+  for (let i = 0; i < totalSlots; i++) {
     const slot = document.createElement('div');
     slot.classList.add('slot');
     slot.dataset.index = i;
     
-    // Allow dropping pieces here
     slot.addEventListener('dragover', (e) => e.preventDefault());
     slot.addEventListener('drop', (e) => handleDrop(e, `slot-${i}`));
     board.appendChild(slot);
   }
   
-  // Allow returning pieces to the tray
   tray.addEventListener('dragover', (e) => e.preventDefault());
   tray.addEventListener('drop', (e) => handleDrop(e, 'tray'));
 }
 
-setupBoard();
-
-// Create or move pieces based on the database state
+// Render puzzle pieces
 function renderPieces(state) {
   if (!state || !state.imageUrl) return;
-  if (isDragging) return; // Prevent board re-drawing while you are actively holding a piece
+  if (isDragging) return; 
 
-  // Generate pieces physically if they don't exist yet
-  if (document.querySelectorAll('.piece').length === 0) {
-    for (let i = 0; i < gridSize * gridSize; i++) {
+  const gridSize = state.gridSize || 4;
+  const totalPieces = gridSize * gridSize;
+  const pieceSize = boardSize / gridSize;
+
+  if (currentGridSize !== gridSize || board.children.length !== totalPieces) {
+    currentGridSize = gridSize;
+    setupBoard(gridSize);
+    tray.innerHTML = '';
+  }
+
+  // Create pieces DOM elements if missing
+  if (document.querySelectorAll('.piece').length !== totalPieces) {
+    tray.innerHTML = '';
+    for (let i = 0; i < totalPieces; i++) {
       const piece = document.createElement('div');
       piece.classList.add('piece');
       piece.id = `piece-${i}`;
       piece.dataset.index = i;
       piece.draggable = true;
       
-      // Cut the image by shifting its background position
+      piece.style.width = `${pieceSize}px`;
+      piece.style.height = `${pieceSize}px`;
+      
       const row = Math.floor(i / gridSize);
       const col = i % gridSize;
       piece.style.backgroundImage = `url(${state.imageUrl})`;
@@ -88,49 +118,44 @@ function renderPieces(state) {
     }
   }
 
-  // Position pieces according to what's in the database
+  // Sync positions from Firestore
   let correctCount = 0;
-  for (let i = 0; i < gridSize * gridSize; i++) {
+  for (let i = 0; i < totalPieces; i++) {
     const piece = document.getElementById(`piece-${i}`);
     if (!piece) continue;
 
-    const location = state.pieces[i] || 'tray';
-    if (location === 'tray') {
+    const location = state.pieces ? state.pieces[i] : 'tray';
+    if (location === 'tray' || !location) {
       tray.appendChild(piece);
     } else if (location.startsWith('slot-')) {
       const slotIndex = location.split('-')[1];
       const slot = document.querySelector(`.slot[data-index="${slotIndex}"]`);
       if (slot) {
         slot.appendChild(piece);
-        // Check if the piece's true index matches the slot's index
         if (slotIndex == i) correctCount++;
       }
     }
   }
 
-  checkWinCondition(correctCount, gridSize * gridSize);
+  checkWinCondition(correctCount, totalPieces);
 }
 
-// Logic: Won't finish unless ALL pieces are in the right spot
 function checkWinCondition(correctCount, total) {
   if (correctCount === total && total > 0) {
-    gameStatus.innerText = "🎉 Puzzle Complete! You did it! 🎉";
+    gameStatus.innerText = "🎉 Puzzle Complete! Perfect job! 🎉";
     gameStatus.style.color = "#4caf50";
   } else {
-    gameStatus.innerText = "Keep going! Pieces are missing or in the wrong spot.";
+    gameStatus.innerText = `Solving puzzle (${correctCount}/${total} correct)`;
     gameStatus.style.color = "#d81b60";
   }
 }
 
-// Sync drops to Firestore
 async function handleDrop(e, targetLocation) {
   e.preventDefault();
   const pieceIndex = e.dataTransfer.getData('text/plain');
+  if (pieceIndex === "" || !localState || !localState.pieces) return;
   
-  if (pieceIndex === "") return;
-  if (!localState || !localState.pieces) return;
-  
-  // Rule: Only 1 piece per slot. Kick an existing piece back to the tray.
+  // Kick piece out if slot is already occupied
   if (targetLocation.startsWith('slot-')) {
     const existingPieceIndex = Object.keys(localState.pieces).find(key => localState.pieces[key] === targetLocation);
     if (existingPieceIndex !== undefined && existingPieceIndex !== pieceIndex) {
@@ -139,16 +164,10 @@ async function handleDrop(e, targetLocation) {
   }
 
   localState.pieces[pieceIndex] = targetLocation;
-  
-  try {
-    await setDoc(docRef, { pieces: localState.pieces }, { merge: true });
-  } catch (error) {
-    console.error("Database error:", error);
-    alert("Error moving piece. Check your Firebase Security Rules!");
-  }
+  await setDoc(docRef, { pieces: localState.pieces }, { merge: true });
 }
 
-// Upload a new image
+// Upload picture handler
 uploadBtn.addEventListener('click', async () => {
   const file = imageUpload.files[0];
   if (!file) {
@@ -156,49 +175,51 @@ uploadBtn.addEventListener('click', async () => {
     return;
   }
   
-  gameStatus.innerText = "Uploading picture... please wait!";
-  gameStatus.style.color = "#d81b60";
+  const gridSize = parseInt(gridSelect.value);
+  const totalPieces = gridSize * gridSize;
+
+  gameStatus.innerText = "Processing image...";
   
-  // Upload to Firebase Storage
-  const fileRef = ref(storage, 'puzzles/' + file.name + Date.now());
-  await uploadBytes(fileRef, file);
-  const url = await getDownloadURL(fileRef);
-  
-  // Reset all pieces to the tray for the new image
-  const initialPieces = {};
-  for (let i = 0; i < gridSize * gridSize; i++) {
-    initialPieces[i] = 'tray';
+  try {
+    const dataUrl = await processImage(file);
+    
+    const initialPieces = {};
+    for (let i = 0; i < totalPieces; i++) {
+      initialPieces[i] = 'tray';
+    }
+    
+    await setDoc(docRef, {
+      imageUrl: dataUrl,
+      gridSize: gridSize,
+      pieces: initialPieces
+    });
+    
+    document.querySelectorAll('.piece').forEach(p => p.remove());
+    gameStatus.innerText = "Puzzle ready! Move the pieces.";
+  } catch (err) {
+    console.error(err);
+    alert("Error loading picture. Please try another image.");
   }
-  
-  // Overwrite the database with the new puzzle
-  await setDoc(docRef, {
-    imageUrl: url,
-    pieces: initialPieces
-  });
-  
-  // Delete the old DOM pieces so they re-render
-  document.querySelectorAll('.piece').forEach(p => p.remove()); 
 });
 
-// Reset the current puzzle without changing the image
+// Reset puzzle handler
 resetBtn.addEventListener('click', async () => {
-  if (localState) {
+  if (localState && localState.gridSize) {
+    const totalPieces = localState.gridSize * localState.gridSize;
     const initialPieces = {};
-    for (let i = 0; i < gridSize * gridSize; i++) {
+    for (let i = 0; i < totalPieces; i++) {
       initialPieces[i] = 'tray';
     }
     await setDoc(docRef, { pieces: initialPieces }, { merge: true });
   }
 });
 
-// Real-time multiplayer listener
+// Real-time listener
 onSnapshot(docRef, (docSnap) => {
   if (docSnap.exists()) {
     localState = docSnap.data();
     if (localState.imageUrl) {
       renderPieces(localState);
     }
-  } else {
-    gameStatus.innerText = "Upload an image to start a new puzzle!";
   }
 });
